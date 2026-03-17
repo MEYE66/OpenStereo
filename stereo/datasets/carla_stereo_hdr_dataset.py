@@ -126,6 +126,8 @@ class CarlaStereoHDRDataset(DatasetTemplate):
 
         left_img = self.apply_noise(left_img)
         right_img = self.apply_noise(right_img)
+        left_img = _safe_minmax_normalize(left_img)
+        right_img = _safe_minmax_normalize(right_img)
         # print(f"left image radiance: {left_img.min()} to {left_img.max()}, right image radiance: {right_img.min()} to {right_img.max()}")
 
         left_disp = _load_disparity(disp_path)
