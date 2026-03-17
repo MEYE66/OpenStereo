@@ -8,6 +8,7 @@ from .gwcnet_cost_processor import GwcVolumeCostProcessor
 from .gwcnet_disp_processor import GwcDispProcessor
 
 
+
 class GwcNet(nn.Module):
     def __init__(self, cfgs):
         super().__init__()
@@ -51,3 +52,6 @@ class GwcNet(nn.Module):
 
         loss_info = {'scalar/train/loss_disp': loss.item()}
         return loss, loss_info
+
+
+

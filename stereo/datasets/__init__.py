@@ -26,6 +26,12 @@ from .dynamic_replica import DynamicReplicaDataset
 from .mono_dataset import MonoDataset
 from .realfill_dataset import RealfillDataset
 
+
+from .carla_stereo_dataset import CarlaStereoDataset
+from .carla_stereo_hdr_dataset import CarlaStereoHDRDataset
+from .carla_sequence_dataset import CarlaSequenceDataset
+
+
 __all__ = {
     'RealfillDataset': RealfillDataset,
     'MonoDataset': MonoDataset,
@@ -46,7 +52,10 @@ __all__ = {
     'VirtualKitti2Dataset': VirtualKitti2Dataset,
     'FoundationStereoDataset': FoundationStereoDataset,
     'DynamicReplicaDataset': DynamicReplicaDataset,
-    'CarlaDataset': CarlaDataset
+    'CarlaDataset': CarlaDataset,
+    'CarlaStereoDataset': CarlaStereoDataset,
+    'CarlaStereoHDRDataset': CarlaStereoHDRDataset,
+    'CarlaSequenceDataset': CarlaSequenceDataset,
 }
 
 

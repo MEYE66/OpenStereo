@@ -4,6 +4,7 @@ import os
 import time
 import glob
 import math
+from typing import Dict
 import torch
 import torch.nn as nn
 import torch.distributed as dist
@@ -155,6 +156,43 @@ class TrainerTemplate:
             clip_grad = ClipGrad(clip_type, clip_value, max_norm, norm_type)
         return clip_grad
 
+    def _select_frame_key(self, data, base):
+        for candidate in (f"{base}_1", f"{base}_0", base):
+            if candidate in data:
+                return candidate
+        raise KeyError(f"No frame key for {base} found in batch data")
+
+    def _select_disp_key(self, data):
+        for candidate in ('disp_1', 'disp', 'disp_0'):
+            if candidate in data:
+                return candidate
+        raise KeyError("No disparity key found in batch data")
+
+    def _select_occ_mask_key(self, data):
+        for candidate in ('occ_mask_1', 'occ_mask', 'occ_mask_0'):
+            if candidate in data:
+                return candidate
+        return None
+
+    def _normalize_carla_sequence_sample(self, data):
+        if 'left_1' in data or 'left2' not in data:
+            return data
+        data['left_0'] = data.get('left')
+        data['right_0'] = data.get('right')
+        data['disp_0'] = data.get('disp')
+        data['occ_mask_0'] = data.get('occ_mask')
+        data['left_1'] = data.pop('left2')
+        data['right_1'] = data.pop('right2')
+        data['disp_1'] = data.pop('disp2')
+        occ_mask2 = data.pop('occ_mask2', None)
+        if occ_mask2 is not None:
+            data['occ_mask_1'] = occ_mask2
+        if 'disp_1' in data and 'valid_1' not in data:
+            max_disp = getattr(self.cfgs.EVALUATOR, 'MAX_DISP',
+                               getattr(self.cfgs.MODEL, 'MAX_DISP', 192))
+            data['valid_1'] = (data['disp_1'] > 0) & (data['disp_1'] < max_disp)
+        return data
+
     def train(self, current_epoch, tbar):
         self.model.train()
         if self.cfgs.OPTIMIZATION.get('FREEZE_BN', False):
@@ -206,6 +244,7 @@ class TrainerTemplate:
             data = next(train_loader_iter)
             for k, v in data.items():
                 data[k] = v.to(self.local_rank) if torch.is_tensor(v) else v
+            self._normalize_carla_sequence_sample(data)
             data_timer = time.time()
 
             with torch.cuda.amp.autocast(enabled=self.cfgs.OPTIMIZATION.AMP):
@@ -249,8 +288,11 @@ class TrainerTemplate:
                 self.logger.info(message)
 
             if self.cfgs.TRAINER.TRAIN_VISUALIZATION:
-                tb_info['image/train/image'] = torch.cat([data['left'][0], data['right'][0]], dim=1) / 256
-                tb_info['image/train/disp'] = color_map_tensorboard(data['disp'][0], model_pred['disp_pred'].squeeze(1)[0])
+                left_vis_key = self._select_frame_key(data, 'left')
+                right_vis_key = self._select_frame_key(data, 'right')
+                disp_vis_key = self._select_disp_key(data)
+                tb_info['image/train/image'] = torch.cat([data[left_vis_key][0], data[right_vis_key][0]], dim=1) / 256
+                tb_info['image/train/disp'] = color_map_tensorboard(data[disp_vis_key][0], model_pred['disp_pred'].squeeze(1)[0])
 
             tb_info.update({'scalar/train/lr': lr})
             if total_iter % logger_iter_interval == 0 and self.local_rank == 0 and self.tb_writer is not None:
@@ -277,6 +319,7 @@ class TrainerTemplate:
         for i, data in enumerate(self.eval_loader):
             for k, v in data.items():
                 data[k] = v.to(local_rank) if torch.is_tensor(v) else v
+            self._normalize_carla_sequence_sample(data)
 
             with torch.cuda.amp.autocast(enabled=self.cfgs.OPTIMIZATION.AMP):
                 infer_start = time.time()
@@ -284,10 +327,12 @@ class TrainerTemplate:
                 infer_time = time.time() - infer_start
 
             disp_pred = model_pred['disp_pred']
-            disp_gt = data["disp"]
+            disp_gt_key = self._select_disp_key(data)
+            disp_gt = data[disp_gt_key]
             mask = (disp_gt < evaluator_cfgs.MAX_DISP) & (disp_gt > 0)
-            if 'occ_mask' in data and evaluator_cfgs.get('APPLY_OCC_MASK', False):
-                mask = mask & ~data['occ_mask'].to(torch.bool)
+            occ_key = self._select_occ_mask_key(data)
+            if occ_key is not None and evaluator_cfgs.get('APPLY_OCC_MASK', False):
+                mask = mask & ~data[occ_key].to(torch.bool)
 
             for m in evaluator_cfgs.METRIC:
                 if m not in metric_func_dict:
@@ -303,9 +348,12 @@ class TrainerTemplate:
                 self.logger.info(message)
 
                 if self.cfgs.TRAINER.EVAL_VISUALIZATION and self.tb_writer is not None:
+                    left_vis_key = self._select_frame_key(data, 'left')
+                    right_vis_key = self._select_frame_key(data, 'right')
+                    disp_vis_key = self._select_disp_key(data)
                     tb_info = {
-                        'image/eval/image': torch.cat([data['left'][0], data['right'][0]], dim=1) / 256,
-                        'image/eval/disp': color_map_tensorboard(data['disp'][0], model_pred['disp_pred'].squeeze(1)[0])
+                        'image/eval/image': torch.cat([data[left_vis_key][0], data[right_vis_key][0]], dim=1) / 256,
+                        'image/eval/disp': color_map_tensorboard(data[disp_vis_key][0], model_pred['disp_pred'].squeeze(1)[0])
                     }
                     write_tensorboard(self.tb_writer, tb_info, current_epoch * len(self.eval_loader) + i)
 
@@ -340,3 +388,77 @@ class TrainerTemplate:
             write_tensorboard(self.tb_writer, tb_info, current_epoch)
 
         self.logger.info(f"Epoch {current_epoch} metrics: {results}")
+
+
+
+
+class TrainerSequenceTemplate(TrainerTemplate):
+    """Trainer template tailored for stereo sequence data.
+
+    This template normalizes sequence samples from CarlaSequenceDataset to a
+    stable key-space and keeps visualization/evaluation compatible with
+    two-timestamp models such as GwcSequenceNet.
+    """
+
+    def _select_frame_key(self, data, base):
+        for candidate in (
+            f"{base}_2", f"{base}2",
+            f"{base}_1", f"{base}1",
+            f"{base}_0", f"{base}0",
+            base,
+        ):
+            if candidate in data:
+                return candidate
+        raise KeyError(f"No frame key for {base} found in batch data")
+
+    def _select_disp_key(self, data):
+        for candidate in ('disp_2', 'disp2', 'disp_1', 'disp1', 'disp', 'disp_0', 'disp0'):
+            if candidate in data:
+                return candidate
+        raise KeyError("No disparity key found in batch data")
+
+    def _select_occ_mask_key(self, data):
+        for candidate in ('occ_mask_2', 'occ_mask2', 'occ_mask_1', 'occ_mask1', 'occ_mask', 'occ_mask_0', 'occ_mask0'):
+            if candidate in data:
+                return candidate
+        return None
+
+    def _normalize_carla_sequence_sample(self, data: Dict[str, object]) -> Dict[str, object]:
+        # Keep compatibility with older naming and map to sequence-friendly aliases.
+        alias_candidates = {
+            'left_1': ('left_1', 'left1', 'left_0', 'left0', 'left'),
+            'right_1': ('right_1', 'right1', 'right_0', 'right0', 'right'),
+            'disp_1': ('disp_1', 'disp1', 'disp_0', 'disp0', 'disp'),
+            'occ_mask_1': ('occ_mask_1', 'occ_mask1', 'occ_mask_0', 'occ_mask0', 'occ_mask'),
+            'left_2': ('left_2', 'left2'),
+            'right_2': ('right_2', 'right2'),
+            'disp_2': ('disp_2', 'disp2'),
+            'occ_mask_2': ('occ_mask_2', 'occ_mask2'),
+            'valid_1': ('valid_1', 'valid1', 'valid'),
+            'valid_2': ('valid_2', 'valid2'),
+        }
+
+        for dst_key, src_keys in alias_candidates.items():
+            if dst_key in data:
+                continue
+            for src_key in src_keys:
+                if src_key in data:
+                    data[dst_key] = data[src_key]
+                    break
+
+        # Default loss/eval target points to the later timestamp.
+        if 'disp' not in data and 'disp_2' in data:
+            data['disp'] = data['disp_2']
+        if 'occ_mask' not in data and 'occ_mask_2' in data:
+            data['occ_mask'] = data['occ_mask_2']
+        if 'valid' not in data and 'valid_2' in data:
+            data['valid'] = data['valid_2']
+
+        if 'disp_2' in data and 'valid_2' not in data:
+            max_disp = getattr(self.cfgs.EVALUATOR, 'MAX_DISP',
+                               getattr(self.cfgs.MODEL, 'MAX_DISP', 192))
+            data['valid_2'] = (data['disp_2'] > 0) & (data['disp_2'] < max_disp)
+            if 'valid' not in data:
+                data['valid'] = data['valid_2']
+
+        return data

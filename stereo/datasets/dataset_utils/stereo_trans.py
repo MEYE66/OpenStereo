@@ -9,6 +9,30 @@ from PIL import Image
 from torchvision.transforms import ColorJitter
 
 
+def _iter_frame_suffixes(sample):
+    suffixes = []
+    if 'left' in sample and 'right' in sample:
+        suffixes.append('')
+    if 'left_1' in sample and 'right_1' in sample:
+        suffixes.append('_1')
+    if 'left_2' in sample and 'right_2' in sample:
+        suffixes.append('_2')
+    return suffixes
+
+
+def _frame_key(base_key, suffix):
+    if suffix == '':
+        return base_key
+    return base_key + suffix
+
+
+def _get_ref_left_key(sample):
+    for key in ['left', 'left_1', 'left_2']:
+        if key in sample:
+            return key
+    raise KeyError('No left image key found in sample')
+
+
 class Compose(object):
     def __init__(self, transforms):
         self.transforms = transforms
@@ -24,8 +48,11 @@ class TransposeImage(object):
         self.config = config
 
     def __call__(self, sample):
-        sample['left'] = sample['left'].transpose((2, 0, 1))
-        sample['right'] = sample['right'].transpose((2, 0, 1))
+        for suffix in _iter_frame_suffixes(sample):
+            left_key = _frame_key('left', suffix)
+            right_key = _frame_key('right', suffix)
+            sample[left_key] = sample[left_key].transpose((2, 0, 1))
+            sample[right_key] = sample[right_key].transpose((2, 0, 1))
         return sample
 
 
@@ -38,7 +65,7 @@ class ToTensor(object):
             if isinstance(sample[k], np.ndarray):
                 if k == 'super_pixel_label':
                     sample[k] = torch.from_numpy(sample[k].copy()).to(torch.int32)
-                elif k in ['occ_mask', 'occ_mask_2']:
+                elif k.startswith('occ_mask') or k.startswith('valid'):
                     sample[k] = torch.from_numpy(sample[k].copy()).to(torch.bool)
                 else:
                     sample[k] = torch.from_numpy(sample[k].copy()).to(torch.float32)
@@ -51,8 +78,11 @@ class NormalizeImage(object):
         self.std = config.STD
 
     def __call__(self, sample):
-        sample['left'] = normalize(sample['left'] / 255.0, self.mean, self.std)
-        sample['right'] = normalize(sample['right'] / 255.0, self.mean, self.std)
+        for suffix in _iter_frame_suffixes(sample):
+            left_key = _frame_key('left', suffix)
+            right_key = _frame_key('right', suffix)
+            sample[left_key] = normalize(sample[left_key] / 255.0, self.mean, self.std)
+            sample[right_key] = normalize(sample[right_key] / 255.0, self.mean, self.std)
         return sample
 
 
@@ -64,7 +94,8 @@ class RandomCrop(object):
 
     def __call__(self, sample):
         crop_height, crop_width = self.crop_size
-        height, width = sample['left'].shape[:2]  # (H, W, 3)
+        left_key = _get_ref_left_key(sample)
+        height, width = sample[left_key].shape[:2]  # (H, W, 3)
         # crop_height = min(height, crop_height)
         # crop_width = min(width, crop_width)
         if crop_width > width or crop_height > height:
@@ -75,8 +106,13 @@ class RandomCrop(object):
         x1 = random.randint(0, width - crop_width)
         y2 = y1 + np.random.randint(-n_pixels, n_pixels + 1)
 
+        right_keys = set([_frame_key('right', suffix) for suffix in _iter_frame_suffixes(sample)])
+
         for k in sample.keys():
-            if k in ['right']:
+            value = sample[k]
+            if not hasattr(value, 'shape') or len(value.shape) < 2:
+                continue
+            if k in right_keys:
                 sample[k] = sample[k][y2: y2 + crop_height, x1: x1 + crop_width]
             elif k in ['pos']: #iinet
                 sample[k] = sample[k][:, y1: y1 + crop_height, x1: x1 + crop_width]
@@ -98,7 +134,8 @@ class RandomScale(object):
         self.max_stretch = 0.2
 
     def __call__(self, sample):
-        ht, wd = sample['left'].shape[:2]
+        left_key = _get_ref_left_key(sample)
+        ht, wd = sample[left_key].shape[:2]
         min_scale = np.maximum((self.crop_size[0] + 8) / float(ht), (self.crop_size[1] + 8) / float(wd))
 
         scale = 2 ** np.random.uniform(self.min_scale, self.max_scale)
@@ -112,13 +149,15 @@ class RandomScale(object):
         scale_y = np.clip(scale_y, min_scale, None)
 
         if np.random.rand() < self.scale_prob:
-            for k in sample.keys():
-                if k in ['left', 'right']:
-                    sample[k] = cv2.resize(sample[k], None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+            for suffix in _iter_frame_suffixes(sample):
+                for image_key in [_frame_key('left', suffix), _frame_key('right', suffix)]:
+                    if image_key in sample:
+                        sample[image_key] = cv2.resize(sample[image_key], None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
 
-                elif k in ['disp', 'disp_right']:
-                    sample[k] = cv2.resize(sample[k], None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
-                    sample[k] = sample[k] * scale_x
+                for disp_key in [_frame_key('disp', suffix), _frame_key('disp_right', suffix)]:
+                    if disp_key in sample:
+                        sample[disp_key] = cv2.resize(sample[disp_key], None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                        sample[disp_key] = sample[disp_key] * scale_x
 
         return sample
 
@@ -131,7 +170,8 @@ class RandomSparseScale(object):
         self.scale_prob = config.SCALE_PROB
 
     def __call__(self, sample):
-        ht, wd = sample['left'].shape[:2]
+        left_key = _get_ref_left_key(sample)
+        ht, wd = sample[left_key].shape[:2]
         min_scale = np.maximum((self.crop_size[0] + 1) / float(ht), (self.crop_size[1] + 1) / float(wd))
 
         scale = 2 ** np.random.uniform(self.min_scale, self.max_scale)
@@ -139,12 +179,14 @@ class RandomSparseScale(object):
         scale_y = np.clip(scale, min_scale, None)
 
         if np.random.rand() < self.scale_prob:
-            for k in sample.keys():
-                if k in ['left', 'right']:
-                    sample[k] = cv2.resize(sample[k], None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+            for suffix in _iter_frame_suffixes(sample):
+                for image_key in [_frame_key('left', suffix), _frame_key('right', suffix)]:
+                    if image_key in sample:
+                        sample[image_key] = cv2.resize(sample[image_key], None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
 
-                elif k in ['disp', 'disp_right']:
-                    sample[k] = self.sparse_disp_map_reisze(sample[k], fx=scale_x, fy=scale_y)
+                for disp_key in [_frame_key('disp', suffix), _frame_key('disp_right', suffix)]:
+                    if disp_key in sample:
+                        sample[disp_key] = self.sparse_disp_map_reisze(sample[disp_key], fx=scale_x, fy=scale_y)
 
         return sample
 
@@ -185,27 +227,29 @@ class RandomErase(object):
         self.bounds = config.BOUNDS
 
     def __call__(self, sample):
-        img1 = sample['left']
-        img2 = sample['right']
+        for suffix in _iter_frame_suffixes(sample):
+            left_key = _frame_key('left', suffix)
+            right_key = _frame_key('right', suffix)
 
-        ht, wd = img1.shape[:2]
-        if 'super_pixel_label' in sample:
-            occ_mask_2 = np.zeros((ht, wd), dtype=bool)
-        if np.random.rand() < self.eraser_aug_prob:
-            mean_color = np.mean(img2.reshape(-1, 3), axis=0)
-            for _ in range(np.random.randint(1, self.max_erase_time + 1)):
-                x0 = np.random.randint(0, wd)
-                y0 = np.random.randint(0, ht)
-                dx = np.random.randint(self.bounds[0], self.bounds[1])
-                dy = np.random.randint(self.bounds[0], self.bounds[1])
-                img2[y0:y0 + dy, x0:x0 + dx, :] = mean_color
-                if 'super_pixel_label' in sample:
-                    occ_mask_2 = np.zeros((ht, wd), dtype=bool)
+            img1 = sample[left_key]
+            img2 = sample[right_key]
+            ht, wd = img1.shape[:2]
 
-        sample['left'] = img1
-        sample['right'] = img2
-        if 'super_pixel_label' in sample:
-            sample['occ_mask_2'] = occ_mask_2
+            if np.random.rand() < self.eraser_aug_prob:
+                mean_color = np.mean(img2.reshape(-1, 3), axis=0)
+                for _ in range(np.random.randint(1, self.max_erase_time + 1)):
+                    x0 = np.random.randint(0, wd)
+                    y0 = np.random.randint(0, ht)
+                    dx = np.random.randint(self.bounds[0], self.bounds[1])
+                    dy = np.random.randint(self.bounds[0], self.bounds[1])
+                    img2[y0:y0 + dy, x0:x0 + dx, :] = mean_color
+
+            sample[left_key] = img1
+            sample[right_key] = img2
+
+        if 'super_pixel_label' in sample and 'left' in sample:
+            ht, wd = sample['left'].shape[:2]
+            sample['occ_mask_2'] = np.zeros((ht, wd), dtype=bool)
         return sample
 
 
@@ -222,20 +266,24 @@ class StereoColorJitter(object):
                                         saturation=self.saturation, hue=[x / 3.14 for x in self.hue])
 
     def __call__(self, sample):
-        img1 = sample['left']
-        img2 = sample['right']
-        # asymmetric
-        if np.random.rand() < self.asymmetric_color_aug_prob:
-            img1 = np.array(self.color_jitter(Image.fromarray(img1.astype(np.uint8))), dtype=np.uint8)
-            img2 = np.array(self.color_jitter(Image.fromarray(img2.astype(np.uint8))), dtype=np.uint8)
-        # symmetric
-        else:
-            image_stack = np.concatenate([img1, img2], axis=0).astype(np.uint8)
-            image_stack = np.array(self.color_jitter(Image.fromarray(image_stack)), dtype=np.uint8)
-            img1, img2 = np.split(image_stack, 2, axis=0)
+        for suffix in _iter_frame_suffixes(sample):
+            left_key = _frame_key('left', suffix)
+            right_key = _frame_key('right', suffix)
 
-        sample['left'] = img1
-        sample['right'] = img2
+            img1 = sample[left_key]
+            img2 = sample[right_key]
+            # asymmetric
+            if np.random.rand() < self.asymmetric_color_aug_prob:
+                img1 = np.array(self.color_jitter(Image.fromarray(img1.astype(np.uint8))), dtype=np.uint8)
+                img2 = np.array(self.color_jitter(Image.fromarray(img2.astype(np.uint8))), dtype=np.uint8)
+            # symmetric
+            else:
+                image_stack = np.concatenate([img1, img2], axis=0).astype(np.uint8)
+                image_stack = np.array(self.color_jitter(Image.fromarray(image_stack)), dtype=np.uint8)
+                img1, img2 = np.split(image_stack, 2, axis=0)
+
+            sample[left_key] = img1
+            sample[right_key] = img2
 
         return sample
 
@@ -245,7 +293,8 @@ class RightTopPad(object):
         self.size = config.SIZE
 
     def __call__(self, sample):
-        h, w = sample['left'].shape[:2]
+        left_key = _get_ref_left_key(sample)
+        h, w = sample[left_key].shape[:2]
         th, tw = self.size
         h = min(h, th)  # ensure h is within the bounds of the image
         w = min(w, tw)  # ensure w is within the bounds of the image
@@ -256,11 +305,11 @@ class RightTopPad(object):
         pad_bottom = 0
         # apply pad for left, right, disp image, and occ mask
         for k in sample.keys():
-            if k in ['left', 'right']:
+            if k.startswith('left') or k.startswith('right'):
                 pad_width = np.array([[pad_top, pad_bottom], [pad_left, pad_right], [0, 0]])
                 sample[k] = np.pad(sample[k], pad_width, 'edge')
 
-            elif k in ['disp', 'disp_right', 'occ_mask', 'occ_mask_right']:
+            elif k.startswith('disp') or k.startswith('occ_mask'):
                 pad_width = np.array([[pad_top, pad_bottom], [pad_left, pad_right]])
                 sample[k] = np.pad(sample[k], pad_width, 'constant', constant_values=0)
 
@@ -273,7 +322,8 @@ class DivisiblePad(object):
         self.mode = config.get('MODE', 'tr')
 
     def __call__(self, sample):
-        h, w = sample['left'].shape[:2]
+        left_key = _get_ref_left_key(sample)
+        h, w = sample[left_key].shape[:2]
         if h % self.by != 0:
             pad_h = self.by - h % self.by
         else:
@@ -298,11 +348,11 @@ class DivisiblePad(object):
 
         # apply pad for left, right, disp image, and occ mask
         for k in sample.keys():
-            if k in ['left', 'right']:
+            if k.startswith('left') or k.startswith('right'):
                 pad_width = np.array([[pad_top, pad_bottom], [pad_left, pad_right], [0, 0]])
                 sample[k] = np.pad(sample[k], pad_width, 'edge')
 
-            elif k in ['disp', 'disp_right', 'occ_mask', 'occ_mask_right']:
+            elif k.startswith('disp') or k.startswith('occ_mask'):
                 pad_width = np.array([[pad_top, pad_bottom], [pad_left, pad_right]])
                 sample[k] = np.pad(sample[k], pad_width, 'constant', constant_values=0)
 
@@ -317,30 +367,38 @@ class RandomFlip(object):
         self.prob = config.PROB
 
     def __call__(self, sample):
-        img1 = sample['left']
-        img2 = sample['right']
-        disp = sample['disp']
-        disp_right = sample['disp_right']
+        for suffix in _iter_frame_suffixes(sample):
+            left_key = _frame_key('left', suffix)
+            right_key = _frame_key('right', suffix)
+            disp_key = _frame_key('disp', suffix)
+            disp_right_key = _frame_key('disp_right', suffix)
 
-        if np.random.rand() < self.prob and self.flip_type == 'horizontal':  # 水平翻转
-            img1 = np.ascontiguousarray(img1[:, ::-1])
-            img2 = np.ascontiguousarray(img2[:, ::-1])
-            disp = np.ascontiguousarray(disp[:, ::-1] * -1.0)
+            if disp_key not in sample:
+                continue
 
-        if np.random.rand() < self.prob and self.flip_type == 'horizontal_swap':  # 水平翻转并交换
-            tmp = np.ascontiguousarray(img1[:, ::-1])
-            img1 = np.ascontiguousarray(img2[:, ::-1])
-            disp = np.ascontiguousarray(disp_right[:, ::-1])
-            img2 = tmp
+            img1 = sample[left_key]
+            img2 = sample[right_key]
+            disp = sample[disp_key]
 
-        if np.random.rand() < self.prob and self.flip_type == 'vertical':  # 垂直翻转
-            img1 = np.ascontiguousarray(img1[::-1, :])
-            img2 = np.ascontiguousarray(img2[::-1, :])
-            disp = np.ascontiguousarray(disp[::-1, :])
+            if np.random.rand() < self.prob and self.flip_type == 'horizontal':  # 水平翻转
+                img1 = np.ascontiguousarray(img1[:, ::-1])
+                img2 = np.ascontiguousarray(img2[:, ::-1])
+                disp = np.ascontiguousarray(disp[:, ::-1] * -1.0)
 
-        sample['left'] = img1
-        sample['right'] = img2
-        sample['disp'] = disp
+            if np.random.rand() < self.prob and self.flip_type == 'horizontal_swap' and disp_right_key in sample:  # 水平翻转并交换
+                tmp = np.ascontiguousarray(img1[:, ::-1])
+                img1 = np.ascontiguousarray(img2[:, ::-1])
+                disp = np.ascontiguousarray(sample[disp_right_key][:, ::-1])
+                img2 = tmp
+
+            if np.random.rand() < self.prob and self.flip_type == 'vertical':  # 垂直翻转
+                img1 = np.ascontiguousarray(img1[::-1, :])
+                img2 = np.ascontiguousarray(img2[::-1, :])
+                disp = np.ascontiguousarray(disp[::-1, :])
+
+            sample[left_key] = img1
+            sample[right_key] = img2
+            sample[disp_key] = disp
         return sample
 
 
@@ -349,12 +407,16 @@ class RightBottomCrop(object):
         self.size = config.SIZE
 
     def __call__(self, sample):
-        h, w = sample['left'].shape[:2]
+        left_key = _get_ref_left_key(sample)
+        h, w = sample[left_key].shape[:2]
         crop_h, crop_w = self.size
         crop_h = min(h, crop_h)
         crop_w = min(w, crop_w)
 
         for k in sample.keys():
+            value = sample[k]
+            if not hasattr(value, 'shape') or len(value.shape) < 2:
+                continue
             sample[k] = sample[k][h - crop_h:, w - crop_w:]
         return sample
 
@@ -366,7 +428,8 @@ class CropOrPad(object):
         self.pad_fn = RightTopPad(config)
 
     def __call__(self, sample):
-        h, w = sample['left'].shape[:2]
+        left_key = _get_ref_left_key(sample)
+        h, w = sample[left_key].shape[:2]
         th, tw = self.size
         if th > h or tw > w:
             sample = self.pad_fn(sample)
@@ -381,8 +444,11 @@ class NormalizeToMinusOneOne(object):
         self.config = config
     
     def __call__(self, sample):
-        img1 = sample['left']
-        img2 = sample['right']
-        sample['left'] = (2.0 * (img1 / 255.0) - 1.0).contiguous()
-        sample['right'] = (2.0 * (img2 / 255.0) - 1.0).contiguous()
+        for suffix in _iter_frame_suffixes(sample):
+            left_key = _frame_key('left', suffix)
+            right_key = _frame_key('right', suffix)
+            img1 = sample[left_key]
+            img2 = sample[right_key]
+            sample[left_key] = (2.0 * (img1 / 255.0) - 1.0).contiguous()
+            sample[right_key] = (2.0 * (img2 / 255.0) - 1.0).contiguous()
         return sample
