@@ -16,7 +16,6 @@ from stereo.modeling.models.gwcnet.gwcnet import GwcNet as BaseGwcNet
 
 
 
-
 class RinToneMapper(nn.Module):
     def __init__(self, param=0.18):
         super().__init__()
@@ -76,3 +75,23 @@ class DRLExposureController(nn.Module):
         exp_time = torch.clamp(out[:, 0], self.min_t, self.max_t)
         gain = torch.clamp(out[:, 1], self.min_gain, self.max_gain)
         return exp_time, gain
+    
+
+
+
+if __name__ == '__main__':
+    from types import SimpleNamespace
+    cfgs = SimpleNamespace(
+        MAX_DISP=int(192),
+        USE_CONCAT_VOLUME=bool(True),
+        CONCAT_CHANNELS=int(8),
+        DOWNSAMPLE=int(4),
+        NUM_GROUPS=int(8),
+    )
+
+    neural_aegwcnet_model = DRLExposureController(cfgs=cfgs)
+
+    inputs = {
+        'left': torch.randn(1, 3, 256, 512),
+        'right': torch.randn(1, 3, 256, 512),
+    }

@@ -16,11 +16,13 @@ try:
     from stereo.modeling.models.ae_util import ImageFormationModel
     from stereo.modeling.models.gwcnet.gwcnet import GwcNet as BaseGwcNet
     from stereo.modeling.models.psmnet.psmnet import PSMNet as BasePSMNet
+    from stereo.modeling.models.gwcnet.gwcnet_sequence import GwcSequenceNet
 except ModuleNotFoundError:
     # Fallback for environments where package root is preconfigured.
     from .submodules import NeuralExposureController, FloorDivSTE
     from ..ae_util import ImageFormationModel
     from ..gwcnet.gwcnet import GwcNet as BaseGwcNet
+    from ..gwcnet.gwcnet_sequence import GwcSequenceNet
     from ..psmnet.psmnet import PSMNet as BasePSMNet
 
 
@@ -77,6 +79,61 @@ class NeuralAEGwcNet(BaseGwcNet):
 
         disp_pred = super(NeuralAEGwcNet, self).forward({'left': img_left_updated, 'right': img_right_updated})
         return disp_pred
+
+
+
+
+class NeuralAEGwcSequenceNet(GwcSequenceNet):
+    def __init__(self, cfgs, time_limits=[1., 20.], gain_limits=[1., 14.], iter=3, mu=0.8):
+        super(NeuralAEGwcSequenceNet, self).__init__(cfgs)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        self.image_formation_model = ImageFormationModel().to(self.device)
+        self.exposure_controller = NeuralExposureController().to(self.device)
+        self.floor_div = FloorDivSTE()
+
+        self.time_limits = torch.tensor(time_limits, requires_grad=True, device=self.device)
+        self.gain_limits = torch.tensor(gain_limits, requires_grad=True, device=self.device)
+
+        self.init_exp = torch.tensor((time_limits[0] + time_limits[1]) / 2, requires_grad=True, device=self.device)
+        self.init_gain = torch.tensor((gain_limits[0] + gain_limits[1]) / 2, requires_grad=True, device=self.device)
+
+        self.iters = iter
+        self.mu = mu
+    
+    def update_function(self, e_t, u_t):
+        log_e_t = self.mu * torch.log(e_t) + (1 - self.mu) * torch.log(e_t * u_t)
+        new_e_t = torch.exp(log_e_t)
+        gain = torch.max(self.gain_limits[0], torch.min(self.gain_limits[1], self.floor_div.apply(new_e_t, self.time_limits[1])))
+        exp_time = torch.max(self.time_limits[0], torch.min(self.time_limits[1], new_e_t / gain))
+        return exp_time, gain
+
+    def forward(self, inputs):
+        curr_radiance_left, curr_radiance_right = inputs['left_1'], inputs['right_1']
+        next_radiance_left, next_radiance_right = inputs['left_2'], inputs['right_2']
+
+        curr_img_left = self.image_formation_model(curr_radiance_left, self.init_exp, self.init_gain)
+        next_img_left = self.image_formation_model(next_radiance_left, self.init_exp, self.init_gain)
+
+        expo_update = self.init_exp
+        for _ in range(self.iters):
+            values = self.exposure_controller((curr_img_left + next_img_left) / 2)
+            expo_update, gain_update = self.update_function(expo_update, values)
+
+            curr_left_updated, curr_right_updated = self.image_formation_model(curr_radiance_left, expo_update, gain_update), self.image_formation_model(curr_radiance_right, expo_update, gain_update)
+            next_left_updated, next_right_updated = self.image_formation_model(next_radiance_left, expo_update, gain_update), self.image_formation_model(next_radiance_right, expo_update, gain_update)
+
+        disp_pred = super(NeuralAEGwcSequenceNet, self).forward({'left_1': curr_left_updated, 'right_1': curr_right_updated, 'left_2': next_left_updated, 'right_2': next_right_updated})
+        return disp_pred
+        
+
+
+
+
+
+
+
+
 
 
 class NeuralAEPSMNet(BasePSMNet):

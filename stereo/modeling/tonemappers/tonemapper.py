@@ -220,6 +220,7 @@ class IANet(nn.Module):
         enhance_image = self.tone_filter(enhance_image, params[:, 4:12])
         enhance_image = self.contrast_filter(enhance_image, params[:, 12])
         enhance_image = self.sharpen_filter(enhance_image, params[:, 13])
+        
         return enhance_image
 
 
@@ -268,6 +269,7 @@ class SANet(nn.Module):
         result = self.post_calibration(result)
         image_hsv[:, 2:3, :, :] = result
         result = kornia.color.hsv_to_rgb(image_hsv)
+        result = (result - result.min()) / (result.max() - result.min())
         return result
 
 

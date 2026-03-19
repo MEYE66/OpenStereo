@@ -2,9 +2,13 @@
 # @Author  : zhangchenming
 from stereo.modeling.trainer_template import TrainerTemplate
 from .psmnet import PSMNet
+from .psmnet_tonemapping import IAPSMNet, RAODPSMNet, SANPSMNet
 
 __all__ = {
     'PSMNet': PSMNet,
+    'IAPSMNet': IAPSMNet,
+    'RAODPSMNet': RAODPSMNet,
+    'SANPSMNet': SANPSMNet
 }
 
 class Trainer(TrainerTemplate):

@@ -78,12 +78,11 @@ def _load_disparity(path):
     raise NotImplementedError('Unsupported disparity format: ' + ext)
 
 
-
 class CarlaStereoDataset(DatasetTemplate):
     def __init__(self, data_info, data_cfg, mode):
         super().__init__(data_info, data_cfg, mode)
         self.max_disp = getattr(self.data_info, 'MAX_DISP', 192)
-        self.hdr = getattr(self.data_info, 'HDR', True)
+        self.minmax_norm = getattr(self.data_info, 'NORM', False)
 
     def __getitem__(self, idx):
         item = self.data_list[idx]
@@ -92,10 +91,9 @@ class CarlaStereoDataset(DatasetTemplate):
         left_img = _load_stereo_image(left_path)
         right_img = _load_stereo_image(right_path)
 
-
-        # if not self.hdr:
-        #     left_img = apply_gtm(left_img)
-        #     right_img = apply_gtm(right_img)
+        if self.minmax_norm:
+            left_img = _safe_minmax_normalize(left_img)
+            right_img = _safe_minmax_normalize(right_img)
 
         left_disp = _load_disparity(disp_path)
         occ_mask = np.zeros_like(left_disp, dtype=bool)

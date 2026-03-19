@@ -1,12 +1,9 @@
 import sys
-
 from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from types import SimpleNamespace
-from typing import Tuple
-
 
 
 repo_root = Path(__file__).resolve().parents[4]
@@ -18,14 +15,13 @@ try:
     from stereo.modeling.models.ae_util import ImageFormationModel, exposure_value_equation
     from stereo.modeling.models.gwcnet.gwcnet import GwcNet as BaseGwcNet
     from stereo.modeling.models.psmnet.psmnet import PSMNet as BasePSMNet
+    from stereo.modeling.models.gwcnet.gwcnet_sequence import GwcSequenceNet
 except ModuleNotFoundError:
     # Fallback for environments where package root is preconfigured.
     from ..ae_util import ImageFormationModel, exposure_value_equation
     from ..gwcnet.gwcnet import GwcNet as BaseGwcNet
+    from ..gwcnet.gwcnet_sequence import GwcSequenceNet
     from ..psmnet.psmnet import PSMNet as BasePSMNet
-
-
-
 
 
 def _grad_score(gray):
@@ -49,8 +45,6 @@ class GradientExposureController(nn.Module):
         grad_strength = _grad_score(gray)
         exp_val = self.target_grad / (grad_strength + 1e-6)
         return torch.clamp(exp_val, self.min_exposure, self.max_exposure)
-
-
 
 
 class GradientAEGwcNet(BaseGwcNet):
@@ -116,7 +110,38 @@ class GardientAEPSMNet(BasePSMNet):
 
 
 
-if __name__ == '__main__':
+
+class GradientAEGwcSequenceNet(GwcSequenceNet):
+    def __init__(self, cfgs, time_limits=[1., 20.], gain_limits=[1., 14.]):
+        super(GradientAEGwcSequenceNet, self).__init__(cfgs)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        self.image_formation_model = ImageFormationModel().to(self.device)
+        self.exposure_controller = GradientExposureController().to(self.device)
+
+        self.time_limits = torch.tensor(time_limits, requires_grad=True, device=self.device)
+        self.gain_limits = torch.tensor(gain_limits, requires_grad=True, device=self.device)
+
+        self.init_exp = torch.tensor((time_limits[0] + time_limits[1]) / 2, requires_grad=True, device=self.device)
+        self.init_gain = torch.tensor((gain_limits[0] + gain_limits[1]) / 2, requires_grad=True, device=self.device)
+
+    def forward(self, inputs):
+        curr_radiance_left, curr_radiance_right = inputs['left_1'], inputs['right_1']
+        next_radiance_left, next_radiance_right = inputs['left_2'], inputs['right_2']
+
+        curr_img_left = self.image_formation_model(curr_radiance_left, self.init_exp, self.init_gain)
+        next_img_left = self.image_formation_model(next_radiance_left, self.init_exp, self.init_gain)
+        expo_values = self.exposure_controller((curr_img_left + next_img_left) / 2)
+        expo_update, gain_update = exposure_value_equation(expo_values, self.time_limits, self.gain_limits)
+
+        curr_left_updated, curr_right_updated = self.image_formation_model(curr_radiance_left, expo_update, gain_update), self.image_formation_model(curr_radiance_right, expo_update, gain_update)
+        next_left_updated, next_right_updated = self.image_formation_model(next_radiance_left, expo_update, gain_update), self.image_formation_model(next_radiance_right, expo_update, gain_update)
+
+        disp_pred = super(GradientAEGwcSequenceNet, self).forward({'left_1': curr_left_updated, 'right_1': curr_right_updated, 'left_2': next_left_updated, 'right_2': next_right_updated})
+        return disp_pred
+
+
+def stereo_test():
     cfgs = SimpleNamespace(
         MAX_DISP=int(192),
         USE_CONCAT_VOLUME=bool(False),
@@ -135,3 +160,34 @@ if __name__ == '__main__':
     with torch.no_grad():
         disp_pred = model({'left': radiance_left, 'right': radiance_right})
     print(disp_pred)
+
+
+def sequence_test():
+    cfgs = SimpleNamespace(
+        MAX_DISP=int(192),
+        USE_CONCAT_VOLUME=bool(False),
+        CONCAT_CHANNELS=int(8),
+        DOWNSAMPLE=int(4),
+        NUM_GROUPS=int(8),
+    )
+    model = GradientAEGwcSequenceNet(cfgs=cfgs)
+    model.eval()
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+    radiance_left = torch.rand(1, 3, 256, 512, device=device)
+    radiance_right = torch.rand(1, 3, 256, 512, device=device)
+
+    # prev_inputs = {'left': inputs['left_1'], 'right': inputs['right_1']}
+    with torch.no_grad():
+        disp_pred = model({'left_1': radiance_left, 'right_1': radiance_right,'left_2': radiance_left, 'right_2': radiance_right})
+    print(disp_pred)
+
+
+
+if __name__ == '__main__':
+    # stereo_test()
+    sequence_test()
+
+
+

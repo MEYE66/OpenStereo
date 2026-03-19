@@ -18,7 +18,7 @@ DATA_CONFIG:
             - { NAME: ToTensor }
 
 MODEL:
-    NAME: NeuralAEPSMNet # [NeuralAEPSMNet] [GardientAEPSMNet] [AverageAEPSMNet] [StereoAEPSMNet]
+    NAME: AverageAEPSMNet # [NeuralAEPSMNet] [GardientAEPSMNet] [AverageAEPSMNet] [StereoAEPSMNet]
     MAX_DISP: &max_disp 192
     FIND_UNUSED_PARAMETERS: false
     CKPT: -1

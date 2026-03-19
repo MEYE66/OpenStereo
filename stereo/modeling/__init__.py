@@ -74,6 +74,12 @@ __all__ = {
     "IAGwcNet": GwcNetTrainer,
     "RAODGwcNet": GwcNetTrainer,
     "SANGwcNet": GwcNetTrainer,
+    "GamutGwcNet": GwcNetTrainer,
+
+    # Tonemapping variants of PSMNet
+    "IAPSMNet": PSMNetTrainer,
+    "RAODPSMNet": PSMNetTrainer,
+    "SANPSMNet": PSMNetTrainer,
 
     # Stereo AE variants
     "AverageAEGwcNet": AverageAEGwcNetTrainer,
