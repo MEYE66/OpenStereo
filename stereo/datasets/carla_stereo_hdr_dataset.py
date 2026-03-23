@@ -84,6 +84,8 @@ class CarlaStereoHDRDataset(DatasetTemplate):
         self.gaussian_var = getattr(self.data_info, 'GAUSSIAN_VAR', 5.0)
         self.poisson_scale = getattr(self.data_info, 'POISSON_SCALE', 1.0)
         self.capacity = getattr(self.data_info, 'CAPACITY', 1e2)
+        self.return_raw_hdr = getattr(self.data_info, 'RETURN_RAW_HDR', False)
+        self.minmax_norm = getattr(self.data_info, 'NORM', True)
 
 
     def apply_noise(self, image):
@@ -109,7 +111,6 @@ class CarlaStereoHDRDataset(DatasetTemplate):
         return image
 
 
-
     def __getitem__(self, idx):
         item = self.data_list[idx]
         full_paths = [os.path.join(self.root, x) for x in item]
@@ -119,15 +120,16 @@ class CarlaStereoHDRDataset(DatasetTemplate):
         right_img = _load_stereo_image(right_path)
         # print(f"left image radiance: {left_img.min()} to {left_img.max()}, right image radiance: {right_img.min()} to {right_img.max()}")
 
+        if not self.return_raw_hdr:
+            left_img = self.radiance_scale(left_img)
+            right_img = self.radiance_scale(right_img)
 
-        left_img = self.radiance_scale(left_img)
-        right_img = self.radiance_scale(right_img)
+            left_img = self.apply_noise(left_img)
+            right_img = self.apply_noise(right_img)
 
-
-        left_img = self.apply_noise(left_img)
-        right_img = self.apply_noise(right_img)
-        left_img = _safe_minmax_normalize(left_img)
-        right_img = _safe_minmax_normalize(right_img)
+            if self.minmax_norm:
+                left_img = _safe_minmax_normalize(left_img)
+                right_img = _safe_minmax_normalize(right_img)
         # print(f"left image radiance: {left_img.min()} to {left_img.max()}, right image radiance: {right_img.min()} to {right_img.max()}")
 
         left_disp = _load_disparity(disp_path)
@@ -162,7 +164,7 @@ if __name__ == '__main__':
             'EVALUATING': args.split_file,
             'TESTING': args.split_file,
         },
-        MAX_DISP=512,
+        MAX_DISP=192,
     )
     data_cfg = SimpleNamespace(
         DATA_TRANSFORM={
@@ -190,7 +192,6 @@ if __name__ == '__main__':
     #     print('Disparity shape:', batch['disp'].shape)
     #     print('Occ mask shape:', batch['occ_mask'].shape)
     #     break
-
 
 
 

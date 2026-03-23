@@ -18,6 +18,8 @@ from stereo.utils.lamb import Lamb
 from stereo.evaluation.metric_per_image import epe_metric, d1_metric, threshold_metric
 
 
+
+# torch.autograd.set_detect_anomaly(True)
 class TrainerTemplate:
     def __init__(self, args, cfgs, local_rank, global_rank, logger, tb_writer, model):
         self.args = args
@@ -93,6 +95,7 @@ class TrainerTemplate:
 
         # load pretrained model
         if self.cfgs.MODEL.PRETRAINED_MODEL:
+            print("!!!! Loading Paramters from pretrained model %s !!!!" % self.cfgs.MODEL.PRETRAINED_MODEL)
             self.logger.info('Loading parameters from checkpoint %s' % self.cfgs.MODEL.PRETRAINED_MODEL)
             if not os.path.isfile(self.cfgs.MODEL.PRETRAINED_MODEL):
                 raise FileNotFoundError

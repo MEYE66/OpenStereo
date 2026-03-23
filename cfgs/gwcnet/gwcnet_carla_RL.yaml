@@ -7,33 +7,41 @@ DATA_CONFIG:
                 TESTING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/test.txt
             }
             RETURN_RIGHT_DISP: false
-            MAX_DISP: 192
             MINMAX_NORM: true
+            MAX_DISP: 192
 
     DATA_TRANSFORM:
         TRAINING:
             - { NAME: RandomCrop, SIZE: [ 512, 512 ], Y_JITTER: false }
             - { NAME: TransposeImage }
             - { NAME: ToTensor }
-            # - { NAME: NormalizeImage, MEAN: [ 0.485, 0.456, 0.406 ], STD: [ 0.229, 0.224, 0.225 ] }
         EVALUATING:
             - { NAME: RightTopPad, SIZE: [ 608, 800 ] }
             - { NAME: TransposeImage }
             - { NAME: ToTensor }
-            # - { NAME: NormalizeImage, MEAN: [ 0.485, 0.456, 0.406 ], STD: [ 0.229, 0.224, 0.225 ] }`
+
 MODEL:
-    NAME: StereoAEGwcNet # [NeuralAEGwcNet] [GradientAEGwcNet] [AverageAEGwcNet] [StereoAEGwcNet]
+    NAME: RLGradientAEGwcNet
     MAX_DISP: &max_disp 192
     USE_CONCAT_VOLUME: true
     CONCAT_CHANNELS: 12
     DOWNSAMPLE: 4
     NUM_GROUPS: 40
+    TIME_LIMITS: [ 5.0, 20.0 ]
+    GAIN_LIMITS: [ 1.0, 14.0 ]
+    INIT_EXPOSURE: 12.5
+    INIT_GAIN: 7.5
+    AE_TARGET_GRAD: 0.12
+    RL_ACTION_SCALE: 2.0
+    RL_HIDDEN_DIM: 32
+    RL_INIT_LOG_STD: -1.0
     FIND_UNUSED_PARAMETERS: false
-    CKPT: -1
-    PRETRAINED_MODEL: ''
+    CKPT: -1 # output/benchmark/CarlaStereoDataset/GwcNet/gwcnet_carla_AE/default/ckpt/checkpoint_epoch_19.pth
+    PRETRAINED_MODEL: '/home/lgz/workspace/OpenStereo/output/benchmark/CarlaStereoDataset/GwcNet/gwcnet_carla_AE/default/ckpt/checkpoint_epoch_19.pth'
+
 
 OPTIMIZATION:
-    BATCH_SIZE_PER_GPU: 6 # 6 default
+    BATCH_SIZE_PER_GPU: 4
     FREEZE_BN: false
     SYNC_BN: true
     AMP: false
@@ -41,7 +49,8 @@ OPTIMIZATION:
 
     OPTIMIZER:
         NAME: AdamW
-        LR: &lr 0.0015
+        LR: &lr 0.0005
+        WEIGHT_DECAY: 0.0001
 
     SCHEDULER:
         NAME: OneCycleLR
@@ -54,8 +63,17 @@ OPTIMIZATION:
         MAX_NORM: 35
         NORM_TYPE: 2
 
+    RL:
+        TRAIN_STEREO: false
+        DISP_LOSS_WEIGHT: 0.0
+        ACTOR_LOSS_WEIGHT: 1.0
+        CRITIC_LOSS_WEIGHT: 0.5
+        ENTROPY_WEIGHT: 0.001
+        REWARD_SCALE: 1.0
+        ACTION_PENALTY_WEIGHT: 0.01
+
 EVALUATOR:
-    BATCH_SIZE_PER_GPU: 12
+    BATCH_SIZE_PER_GPU: 4
     MAX_DISP: *max_disp
     METRIC:
         - d1_all

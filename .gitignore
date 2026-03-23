@@ -1,9 +1,13 @@
 .idea
 **__pycache__**
 **.DS_Store**
+*.png
 data/*/*.txt
 cfgs/*/*stereocarla.yaml
 
 cfgs/foundationstereo/fstereo_*.yaml
 output/
+img_out/
+CKPT/
 cfgs/foundationstereo/fstereo_combine.yaml
+tmp_code.py
