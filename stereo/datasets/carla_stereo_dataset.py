@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import torch
 
-
 try:
     from stereo.datasets.dataset_template import DatasetTemplate
 except ModuleNotFoundError:
@@ -37,6 +36,21 @@ def _safe_minmax_normalize(arr):
     scale = max(max_val - min_val, 1e-6)
     return (arr - min_val) / scale
 
+
+def inverse_mu_law(img, mu=5000.0):
+    # inverse μ-law
+    img = np.clip(img, 0, 1)
+    # x = (np.power(1 + mu, img) - 1.0) / (mu + eps)
+    x = np.expm1(img * np.log1p(mu)) / mu
+    return x
+
+
+
+def radiance_scale(radiance, capacity=1.0):
+    radiance = _safe_minmax_normalize(radiance)
+    mean_val = np.mean(radiance)
+    scale = capacity / (mean_val + 1e-8)
+    return radiance * scale
 
 
 
@@ -82,7 +96,8 @@ class CarlaStereoDataset(DatasetTemplate):
     def __init__(self, data_info, data_cfg, mode):
         super().__init__(data_info, data_cfg, mode)
         self.max_disp = getattr(self.data_info, 'MAX_DISP', 192)
-        self.minmax_norm = getattr(self.data_info, 'NORM', False)
+        self.minmax_norm = getattr(self.data_info, 'MINMAX_NORM', True)
+        self.add_noise = getattr(self.data_info, 'ADD_NOISE', False)
 
     def __getitem__(self, idx):
         item = self.data_list[idx]
@@ -92,8 +107,14 @@ class CarlaStereoDataset(DatasetTemplate):
         right_img = _load_stereo_image(right_path)
 
         if self.minmax_norm:
-            left_img = _safe_minmax_normalize(left_img)
-            right_img = _safe_minmax_normalize(right_img)
+            # left_img = _safe_minmax_normalize(left_img)
+            # right_img = _safe_minmax_normalize(right_img)
+            left_img = radiance_scale(left_img, capacity=1.0)
+            right_img = radiance_scale(right_img, capacity=1.0)
+
+        # if self.add_noise:
+        #     left_img = self.apply_noise(left_img)
+        #     right_img = self.apply_noise(right_img)
 
         left_disp = _load_disparity(disp_path)
         occ_mask = np.zeros_like(left_disp, dtype=bool)
@@ -127,7 +148,8 @@ if __name__ == '__main__':
             'EVALUATING': args.split_file,
             'TESTING': args.split_file,
         },
-        MAX_DISP=512,
+        MAX_DISP=192,
+        MINMAX_NORM=True,
     )
     data_cfg = SimpleNamespace(
         DATA_TRANSFORM={
@@ -155,7 +177,6 @@ if __name__ == '__main__':
     #     print('Disparity shape:', batch['disp'].shape)
     #     print('Occ mask shape:', batch['occ_mask'].shape)
     #     break
-
 
 
 

@@ -4,32 +4,25 @@
 # from ref_code.averageae_arch import AverageAEStereoNet
 
 from .models.casnet.trainer import Trainer as CasStereoTrainer
-from .models.cfnet.trainer import Trainer as CFNetTrainer
-# from .models.aanet.trainer import Trainer as AANetTrainer
-from .models.coex.trainer import Trainer as CoExTrainer
-from .models.fadnet.trainer import Trainer as FADNetTrainer
 from .models.gwcnet.trainer import Trainer as GwcNetTrainer
 from .models.gwcnet.trainer import SequenceTrainer as GwcNetSequenceTrainer
 
 
 
-# from .models.gwcnet_jointae.trainer import Trainer as JointAEGwcNetTrainer
-from .models.igev.trainer import Trainer as IGEVTrainer
 from .models.msnet.trainer import Trainer as MSNetTrainer
 from .models.psmnet.trainer import Trainer as PSMNetTrainer
 from .models.sttr.trainer import Trainer as STTRTrainer
 # from .models.lightstereo.trainer import Trainer as LightStereoTrainer
 # from .models.stereobase.trainer import Trainer as StereoBaseGRUTrainer
 # from .models.iinet.trainer import Trainer as IINetTrainer
-from .models.monster.trainer import Trainer as MonsterTrainer
-from .models.igevpp.trainer import Trainer as IGEVPPTrainer
-from .models.igev_rt.trainer import Trainer as IGEVRTTrainer
 
 
 from .models.avenet.trainer_gwcnet import Trainer as AverageAEGwcNetTrainer
 from .models.avenet.trainer_psmnet import Trainer as AverageAEPSMNetTrainer
 from .models.gradnet.trainer_gwcnet import Trainer as GradientAEGwcNetTrainer
+from .models.gradnet.trainer_gwcnet import RLTrainer as RLGradientAEGwcNetTrainer
 from .models.gradnet.trainer_psmnet import Trainer as GardientAEPSMNetTrainer
+from .models.gradnet.trainer_psmnet import RLTrainer as RLGardientAEPSMNetTrainer
 from .models.neuralnet.trainer_gwcnet import Trainer as NeuralAEGwcNetTrainer
 from .models.neuralnet.trainer_psmnet import Trainer as NeuralAEPSMNetTrainer
 from .models.stereonet.trainer import Trainer as StereoAEGwcNetTrainer
@@ -52,12 +45,8 @@ __all__ = {
     'PSMNet': PSMNetTrainer,
     'MSNet2D': MSNetTrainer,
     'MSNet3D': MSNetTrainer,
-    'IGEV': IGEVTrainer,
     'GwcNet': GwcNetTrainer,
-    'FADNet': FADNetTrainer,
-    'CoExNet': CoExTrainer,
     # 'AANet': AANetTrainer,
-    'CFNet': CFNetTrainer,
     'CasGwcNet': CasStereoTrainer,
     'CasPSMNet': CasStereoTrainer,
     # 'LightStereo': LightStereoTrainer,
@@ -65,9 +54,6 @@ __all__ = {
     # 'FoundationStereo': FoundationStereoTrainer,
     # 'IInet': IINetTrainer,
     # 'NMRF': NMRFTrainer
-    "MonSter": MonsterTrainer,
-    "IGEVPP": IGEVPPTrainer,
-    "IGEVRT": IGEVRTTrainer,
 
 
     # Tonemapping variants of GwcNet
@@ -88,7 +74,9 @@ __all__ = {
     "StereoAEGwcNet": StereoAEGwcNetTrainer,
     "AverageAEPSMNet": AverageAEPSMNetTrainer,
     "GardientAEPSMNet": GardientAEPSMNetTrainer,
+    "RLGardientAEPSMNet": RLGardientAEPSMNetTrainer,
     "NeuralAEPSMNet": NeuralAEPSMNetTrainer,
+    "RLGradientAEGwcNet": RLGradientAEGwcNetTrainer,
 
     # Sequence AE variants
     'GwcSequenceNet': GwcNetSequenceTrainer,

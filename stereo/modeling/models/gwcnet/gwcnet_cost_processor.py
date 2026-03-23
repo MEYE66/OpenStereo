@@ -10,12 +10,35 @@ class GwcVolumeCostProcessor(nn.Module):
         self.num_groups = num_groups
         self.use_concat_volume = use_concat_volume
 
-    def groupwise_correlation(self, fea1, fea2):
+    def groupwise_correlation(self, fea1, fea2, similarity_type='None'):
         B, C, H, W = fea1.shape
         num_groups = self.num_groups
         assert C % num_groups == 0
         channels_per_group = C // num_groups
-        cost = (fea1 * fea2).view([B, num_groups, channels_per_group, H, W]).mean(dim=2)
+        
+        f1 = fea1.view([B, num_groups, channels_per_group, H, W])
+        f2 = fea2.view([B, num_groups, channels_per_group, H, W])
+        
+        if similarity_type == 'cosine':
+            # Cosine Similarity
+            norm1 = torch.norm(f1, dim=2, keepdim=True)
+            norm2 = torch.norm(f2, dim=2, keepdim=True)
+            eps = 1e-5
+            cost = (f1 * f2).sum(dim=2) / (norm1.squeeze(2) * norm2.squeeze(2) + eps)
+        elif similarity_type == 'ncc':
+            # Normalized Cross Correlation (zero-centered)
+            f1_mean = f1.mean(dim=2, keepdim=True)
+            f2_mean = f2.mean(dim=2, keepdim=True)
+            f1_centered = f1 - f1_mean
+            f2_centered = f2 - f2_mean
+            norm1 = torch.norm(f1_centered, dim=2, keepdim=True)
+            norm2 = torch.norm(f2_centered, dim=2, keepdim=True)
+            eps = 1e-5
+            cost = (f1_centered * f2_centered).sum(dim=2) / (norm1.squeeze(2) * norm2.squeeze(2) + eps)
+        else:
+            # Original inner product
+            cost = (f1 * f2).mean(dim=2)
+
         assert cost.shape == (B, num_groups, H, W)
         return cost
 

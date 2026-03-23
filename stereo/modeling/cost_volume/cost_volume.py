@@ -29,14 +29,41 @@ class CoExCostVolume(nn.Module):
         return cost
 
 
-def correlation_volume(left_feature, right_feature, max_disp):
+def correlation_volume(left_feature, right_feature, max_disp, similarity_type='ncc'):
     b, c, h, w = left_feature.size()
     cost_volume = left_feature.new_zeros(b, max_disp, h, w)
+    
     for i in range(max_disp):
         if i > 0:
-            cost_volume[:, i, :, i:] = (left_feature[:, :, :, i:] * right_feature[:, :, :, :-i]).mean(dim=1)
+            f1 = left_feature[:, :, :, i:]
+            f2 = right_feature[:, :, :, :-i]
         else:
-            cost_volume[:, i, :, :] = (left_feature * right_feature).mean(dim=1)
+            f1 = left_feature
+            f2 = right_feature
+
+        if similarity_type == 'cosine':
+            norm1 = torch.norm(f1, dim=1, keepdim=True)
+            norm2 = torch.norm(f2, dim=1, keepdim=True)
+            eps = 1e-5
+            cost = (f1 * f2).sum(dim=1) / (norm1.squeeze(1) * norm2.squeeze(1) + eps)
+        elif similarity_type == 'ncc':
+            f1_mean = f1.mean(dim=1, keepdim=True)
+            f2_mean = f2.mean(dim=1, keepdim=True)
+            f1_centered = f1 - f1_mean
+            f2_centered = f2 - f2_mean
+            norm1 = torch.norm(f1_centered, dim=1, keepdim=True)
+            norm2 = torch.norm(f2_centered, dim=1, keepdim=True)
+            eps = 1e-5
+            cost = (f1_centered * f2_centered).sum(dim=1) / (norm1.squeeze(1) * norm2.squeeze(1) + eps)
+        else:
+            # Original unnormalized inner product
+            cost = (f1 * f2).mean(dim=1)
+            
+        if i > 0:
+            cost_volume[:, i, :, i:] = cost
+        else:
+            cost_volume[:, i, :, :] = cost
+
     cost_volume = cost_volume.contiguous()
     return cost_volume
 
@@ -56,11 +83,32 @@ def compute_volume(reference_embedding, target_embedding, maxdisp, side='left'):
     return cost
 
 
-def groupwise_correlation(fea1, fea2, num_groups):
+def groupwise_correlation(fea1, fea2, num_groups, similarity_type='ncc'):
     B, C, H, W = fea1.shape
     assert C % num_groups == 0
     channels_per_group = C // num_groups
-    cost = (fea1 * fea2).view([B, num_groups, channels_per_group, H, W]).mean(dim=2)
+    
+    f1 = fea1.view([B, num_groups, channels_per_group, H, W])
+    f2 = fea2.view([B, num_groups, channels_per_group, H, W])
+    
+    if similarity_type == 'cosine':
+        norm1 = torch.norm(f1, dim=2, keepdim=True)
+        norm2 = torch.norm(f2, dim=2, keepdim=True)
+        eps = 1e-5
+        cost = (f1 * f2).sum(dim=2) / (norm1.squeeze(2) * norm2.squeeze(2) + eps)
+    elif similarity_type == 'ncc':
+        f1_mean = f1.mean(dim=2, keepdim=True)
+        f2_mean = f2.mean(dim=2, keepdim=True)
+        f1_centered = f1 - f1_mean
+        f2_centered = f2 - f2_mean
+        norm1 = torch.norm(f1_centered, dim=2, keepdim=True)
+        norm2 = torch.norm(f2_centered, dim=2, keepdim=True)
+        eps = 1e-5
+        cost = (f1_centered * f2_centered).sum(dim=2) / (norm1.squeeze(2) * norm2.squeeze(2) + eps)
+    else:
+        # Original Inner Product
+        cost = (f1 * f2).mean(dim=2)
+        
     assert cost.shape == (B, num_groups, H, W)
     return cost
 

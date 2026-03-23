@@ -7,7 +7,7 @@ DATA_CONFIG:
                 TESTING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/test.txt
             }
             RETURN_RIGHT_DISP: false
-            NORM: true
+            MINMAX_NORM: true
 
     DATA_TRANSFORM:
         TRAINING:

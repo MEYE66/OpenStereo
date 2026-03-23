@@ -220,7 +220,7 @@ class IANet(nn.Module):
         enhance_image = self.tone_filter(enhance_image, params[:, 4:12])
         enhance_image = self.contrast_filter(enhance_image, params[:, 12])
         enhance_image = self.sharpen_filter(enhance_image, params[:, 13])
-        
+    
         return enhance_image
 
 
@@ -272,6 +272,22 @@ class SANet(nn.Module):
         result = (result - result.min()) / (result.max() - result.min())
         return result
 
+
+
+# class ToneFilter(nn.Module):
+#     def __init__(self, cfgs):
+#         return
+#     def forward(self, img):
+#         return img
+    # tone_curve = param  # [batch, 8, 1, 1, 1]
+    # tone_curve_sum = torch.sum(tone_curve, dim=1) + 1e-30
+    # total_image = img * 0
+    # for i in range(self.cfg.curve_steps):
+    #     total_image += torch.clip(img - 1.0 * i / self.cfg.curve_steps, 0, 1.0 / self.cfg.curve_steps) \
+    #                    * param[:, i, :, :, :]
+    # total_image *= self.cfg.curve_steps / tone_curve_sum
+    # img = total_image
+    # return img
 
 
 def model_computation(model, input_data):
