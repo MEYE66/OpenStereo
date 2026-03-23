@@ -100,7 +100,7 @@ class CarlaStereoHDRDataset(DatasetTemplate):
         adc_noise = gauss_std * np.random.randn(*image.shape)
 
         noise_image = shot_noise + readout_noise + adc_noise
-        noise_image = np.clip(image + noise_image, 0.0, None)
+        noise_image = np.clip(noise_image, 0.0, None)
         return noise_image
 
 

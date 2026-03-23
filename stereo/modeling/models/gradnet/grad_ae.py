@@ -57,7 +57,6 @@ class GradientExposureControlMixin(ExposureControlMixin):
         )
 
 
-
 class GradientAEGwcNet(GradientExposureControlMixin, BaseGwcNet):
     def __init__(self, cfgs, time_limits=(1.0, 20.0), gain_limits=(1.0, 14.0)):
         super(GradientAEGwcNet, self).__init__(cfgs)

@@ -190,16 +190,17 @@ if __name__ == "__main__":
     right_hdr = radiance_scale(right_hdr, capacity=1)
 
     
-    print(f"radiance 90% percentile: {np.percentile(left_hdr, 90)}, {np.percentile(right_hdr, 90)}")
+    # print(f"radiance 90% percentile: {np.percentile(left_hdr, 90)}, {np.percentile(right_hdr, 90)}")
     # exit(0)
 
     # Convert to PyTorch tensors
     left_tensor = torch.from_numpy(left_hdr).permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
     right_tensor = torch.from_numpy(right_hdr).permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
+
     
     # Example exposure values
     t_pred = torch.tensor([10.0])  # exposure multiplier
-    g_pred = torch.tensor([1.0])  # gain multiplier 
+    g_pred = torch.tensor([5.0])  # gain multiplier 
     # Simulate noisy, quantized images
     left_noisy = image_formation(left_tensor, t_pred, g_pred)
     right_noisy = image_formation(right_tensor, t_pred, g_pred)

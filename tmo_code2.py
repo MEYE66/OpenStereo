@@ -115,7 +115,7 @@ def apply_gtm(img, eps=1e-6, param=0.18):
 
 def inverse_mu_law(img, mu=5000.0, eps=1e-8):
     # inverse μ-law
-    img = np.clip(img, 0, 1)
+    # img = np.clip(img, 0, 1)
     # x = (np.power(1 + mu, img) - 1.0) / (mu + eps)
     x = np.expm1(img * np.log1p(mu)) / mu
     return x
@@ -186,9 +186,11 @@ if __name__ == '__main__':
     # cv2.imwrite(f"./img_out/captured_right_image_{id}.png", cv2.cvtColor(captured_right, cv2.COLOR_RGB2BGR))
     # left_img = minmax_norm(left_img) 
     # right_img = minmax_norm(right_img)
-    
-    left_img = radiance_scale(left_img, 1e0)
-    right_img = radiance_scale(right_img, 1e0)
+
+    left_img = inverse_mu_law(left_img, mu=100.0, eps=1e-8)
+    right_img = inverse_mu_law(right_img, mu=500.0, eps=1e-8)
+    left_img = radiance_scale(left_img, 1.0)
+    right_img = radiance_scale(right_img, 1.0)
 
     print(f"image range:{left_img.mean()} {left_img.min()}, {left_img.max()},{right_img.mean()}  {right_img.min()}, {right_img.max()}")
     print(f"dynamic range` :{cal_dynamic_range(left_img)}, {cal_dynamic_range(right_img)}")
@@ -196,7 +198,7 @@ if __name__ == '__main__':
 
     # print(128/0.18)
 
-    exp, gain = 20, 5
+    exp, gain = 10, 15
     left_img = image_formation_model.forward(left_img, exp, gain)
     right_img = image_formation_model.forward(right_img, exp, gain)
 
