@@ -47,8 +47,8 @@ class StereoExposureAgent(nn.Module):
         self.image_formation_model = ImageFormationModel()
         self.base_controller = GradientExposureController(
             target_grad=target_grad,
-            min_exposure=time_limits[0]*gain_limits[0],
-            max_exposure=time_limits[1]*gain_limits[1],
+            min_exposure=time_limits[0] * gain_limits[0],
+            max_exposure=time_limits[1] * gain_limits[1],
         )
 
         time_delta_scale = float(_cfg_get(cfgs, 'RL_TIME_DELTA_SCALE', _cfg_get(cfgs, 'RL_ACTION_SCALE', 2.0)))
@@ -116,13 +116,12 @@ class StereoExposureAgent(nn.Module):
 
         action = self._clamp_action(base_action + residual_action)
         act_left, act_right = self._render_pair(radiance_left, radiance_right, action)
-        base_left, base_right = self._render_pair(radiance_left, radiance_right, base_action)
 
         return {
             'left_img': act_left,
             'right_img': act_right,
-            'base_left_img': base_left,
-            'base_right_img': base_right,
+            'seed_left_img': seed_left,
+            'seed_right_img': seed_right,
             'log_prob': log_prob,
             'entropy': entropy,
             'value': value,
@@ -160,7 +159,7 @@ def _forward_rl_common(model, inputs, deterministic=False):
 
     model_pred = model._forward_stereo(action_info['left_img'], action_info['right_img'])
     with torch.no_grad():
-        baseline_pred = model._forward_stereo(action_info['base_left_img'], action_info['base_right_img'])
+        state_t_pred = model._forward_stereo(action_info['seed_left_img'], action_info['seed_right_img'])
 
     rl_info = {
         'log_prob': action_info['log_prob'],
@@ -171,7 +170,7 @@ def _forward_rl_common(model, inputs, deterministic=False):
         'residual_action': action_info['residual_action'],
         'action_params': action_info['action_params'],
         'base_action_params': action_info['base_action_params'],
-        'baseline_pred': baseline_pred,
+        'state_t_pred': state_t_pred,
     }
     return model_pred, rl_info
 
@@ -187,10 +186,12 @@ def _get_rl_loss_common(model, model_preds, input_data, rl_info, rl_cfg=None):
     pred_error = _masked_abs_error_per_sample(model_preds['disp_pred'].squeeze(1), disp_gt, mask)
 
     with torch.no_grad():
-        baseline_error = _masked_abs_error_per_sample(
-            rl_info['baseline_pred']['disp_pred'].squeeze(1), disp_gt, mask
+        state_t_error = _masked_abs_error_per_sample(
+            rl_info['state_t_pred']['disp_pred'].squeeze(1), disp_gt, mask
         )
-    reward = baseline_error - pred_error.detach()
+
+    # r_d = disp_loss(s_{t+1}) - disp_loss(s_t)
+    reward = pred_error.detach() - state_t_error
 
     action_penalty_weight = float(rl_cfg.get('ACTION_PENALTY_WEIGHT', 0.0))
     if action_penalty_weight > 0.0:
@@ -203,8 +204,6 @@ def _get_rl_loss_common(model, model_preds, input_data, rl_info, rl_cfg=None):
     actor_loss = actor_loss - float(rl_cfg.get('ENTROPY_WEIGHT', 0.001)) * rl_info['entropy'].mean()
     critic_loss = F.mse_loss(rl_info['value'], reward)
 
-    ### TODO: consider weighting the disparity loss together with the RL losses, or treating it as part of the reward design instead of a separate loss term.
-    # disp_loss_weight = float(rl_cfg.get('DISP_LOSS_WEIGHT', 1.0 if rl_cfg.get('TRAIN_STEREO', True) else 0.0))
     disp_loss_weight = float(rl_cfg.get('DISP_LOSS_WEIGHT', 1.0))
     actor_loss_weight = float(rl_cfg.get('ACTOR_LOSS_WEIGHT', 1.0))
     critic_loss_weight = float(rl_cfg.get('CRITIC_LOSS_WEIGHT', 0.5))
@@ -216,6 +215,7 @@ def _get_rl_loss_common(model, model_preds, input_data, rl_info, rl_cfg=None):
         'scalar/train/loss_critic': critic_loss.item(),
         'scalar/train/reward': reward.mean().item(),
         'scalar/train/pred_error': pred_error.mean().item(),
+        'scalar/train/state_t_error': state_t_error.mean().item(),
         'scalar/train/exposure_action': rl_info['exposure_action'].mean().item(),
         'scalar/train/residual_action': rl_info['residual_action'].mean().item(),
         'scalar/train/time_left': rl_info['action_params'][:, 0].mean().item(),

@@ -13,9 +13,11 @@ if str(repo_root) not in sys.path:
 try:
     from stereo.modeling.models.ae_util import _cfg_get, ExposureControlMixin
     from stereo.modeling.models.gwcnet.gwcnet import GwcNet as BaseGwcNet
+    from stereo.modeling.models.psmnet.psmnet import PSMNet as BasePSMNet
 except ModuleNotFoundError:
     from ..ae_util import _cfg_get, ExposureControlMixin
     from ..gwcnet.gwcnet import GwcNet as BaseGwcNet
+    from ..psmnet.psmnet import PSMNet as BasePSMNet
 
 
 def _brightness_channel(image: torch.Tensor) -> torch.Tensor:
@@ -172,7 +174,7 @@ class StereoExposureController(nn.Module):
         return new_left, new_right
 
 
-class StereoHistogramExposureControlMixin(ExposureControlMixin):
+class StereoExposureControlMixin(ExposureControlMixin):
     def _build_exposure_controller(self, cfgs, time_limits, gain_limits):
         return StereoExposureController(
             low_threshold=float(_cfg_get(cfgs, 'AE_LOW_THRESHOLD', 0.05)),
@@ -187,7 +189,7 @@ class StereoHistogramExposureControlMixin(ExposureControlMixin):
         )
 
 
-class StereoAEGwcNet(StereoHistogramExposureControlMixin, BaseGwcNet):
+class StereoAEGwcNet(StereoExposureControlMixin, BaseGwcNet):
     def __init__(self, cfgs, time_limits=(5.0, 20.0), gain_limits=(1.0, 20.0), iters=3):
         super(StereoAEGwcNet, self).__init__(cfgs)
         self._init_exposure_control(cfgs, default_time_limits=time_limits, default_gain_limits=gain_limits)
@@ -233,6 +235,55 @@ class StereoAEGwcNet(StereoHistogramExposureControlMixin, BaseGwcNet):
         return self._forward_stereo(img_left_updated, img_right_updated)
 
 
+
+class StereoAEPSMNet(StereoExposureControlMixin, BasePSMNet):
+    def __init__(self, cfgs, time_limits=(5.0, 20.0), gain_limits=(1.0, 20.0), iters=3):
+        super(StereoAEPSMNet, self).__init__(cfgs)
+        self._init_exposure_control(cfgs, default_time_limits=time_limits, default_gain_limits=gain_limits)
+        self.iters = int(_cfg_get(cfgs, 'AE_ITERS', iters))
+        self.max_ev = self.time_limits[1] * self.gain_limits[1]
+
+    def _forward_stereo(self, left_img, right_img):
+        return super(StereoAEPSMNet, self).forward({'left': left_img, 'right': right_img})
+
+    def forward(self, inputs):
+        radiance_left, radiance_right = inputs['left'], inputs['right']
+
+        img_left_updated, img_right_updated = self._build_seed_images(radiance_left, radiance_right)
+        img_left_updated = torch.clamp(img_left_updated.float(), 0.0, 1.0)
+        img_right_updated = torch.clamp(img_right_updated.float(), 0.0, 1.0)
+
+        batch_size = img_left_updated.shape[0]
+        alpha = float(self.exposure_controller.alpha)
+        alpha_left = torch.full((batch_size,), alpha, dtype=img_left_updated.dtype, device=img_left_updated.device)
+        alpha_right = torch.full((batch_size,), alpha, dtype=img_right_updated.dtype, device=img_right_updated.device)
+
+        expo_update_left = self._expand_scalar_buffer(self.init_exp, batch_size)
+        expo_update_right = self._expand_scalar_buffer(self.init_exp, batch_size)
+
+        for _ in range(self.iters):
+            expo_left, expo_right = self.exposure_controller(
+                img_left_updated,
+                img_right_updated,
+                expo_update_left,
+                expo_update_right,
+                alpha_left,
+                alpha_right,
+            )
+
+            expo_update_left = torch.clamp(expo_left, self.time_limits[0], self.time_limits[1])
+            expo_update_right = torch.clamp(expo_right, self.time_limits[0], self.time_limits[1])
+            gain_update_left = torch.clamp(self.max_ev / expo_update_left, self.gain_limits[0], self.gain_limits[1])
+            gain_update_right = torch.clamp(self.max_ev / expo_update_right, self.gain_limits[0], self.gain_limits[1])  
+        
+            img_left_updated = self.image_formation_model(radiance_left, expo_update_left, gain_update_left)
+            img_right_updated = self.image_formation_model(radiance_right, expo_update_right, gain_update_right)
+        return self._forward_stereo(img_left_updated, img_right_updated)
+
+
+
+
+
 if __name__ == '__main__':
     from types import SimpleNamespace
 
@@ -243,10 +294,12 @@ if __name__ == '__main__':
         DOWNSAMPLE=int(4),
         NUM_GROUPS=int(8),
     )
-    model = StereoAEGwcNet(cfgs=cfgs)
+    # model = StereoAEGwcNet(cfgs=cfgs)
+    model = StereoAEPSMNet(cfgs=cfgs)
     model.eval()
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     model.to(device)
     radiance_left = torch.rand(1, 3, 256, 512, device=device)
     radiance_right = torch.rand(1, 3, 256, 512, device=device)

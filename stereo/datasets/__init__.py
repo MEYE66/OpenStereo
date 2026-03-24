@@ -28,9 +28,9 @@ from .realfill_dataset import RealfillDataset
 
 
 from .carla_stereo_dataset import CarlaStereoDataset
-from .carla_stereo_hdr_dataset import CarlaStereoHDRDataset
 from .carla_sequence_dataset import CarlaSequenceDataset
 
+from .lidar_stereo_dataset import LidarStereoDataset
 
 __all__ = {
     'RealfillDataset': RealfillDataset,
@@ -54,8 +54,9 @@ __all__ = {
     'DynamicReplicaDataset': DynamicReplicaDataset,
     'CarlaDataset': CarlaDataset,
     'CarlaStereoDataset': CarlaStereoDataset,
-    'CarlaStereoHDRDataset': CarlaStereoHDRDataset,
     'CarlaSequenceDataset': CarlaSequenceDataset,
+    'LidarStereoDataset': LidarStereoDataset,
+    
 }
 
 

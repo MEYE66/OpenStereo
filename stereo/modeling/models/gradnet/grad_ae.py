@@ -52,8 +52,8 @@ class GradientExposureControlMixin(ExposureControlMixin):
         target_grad = float(_cfg_get(cfgs, 'AE_TARGET_GRAD', _cfg_get(cfgs, 'TARGET_GRAD', 0.12)))
         return GradientExposureController(
             target_grad=target_grad,
-            min_exposure=time_limits[0],
-            max_exposure=time_limits[1],
+            min_exposure=time_limits[0]*gain_limits[0],
+            max_exposure=time_limits[1]*gain_limits[1],
         )
 
 

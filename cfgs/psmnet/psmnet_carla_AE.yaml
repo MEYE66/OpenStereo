@@ -7,6 +7,10 @@ DATA_CONFIG:
                 TESTING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/test.txt
             }
             RETURN_RIGHT_DISP: false
+            MAX_DISP: 192
+            MINMAX_NORM: true
+            ADD_NOISE: false # only enable for PSMNet
+
     DATA_TRANSFORM:
         TRAINING:
             - { NAME: RandomCrop, SIZE: [ 512, 512 ], Y_JITTER: false }
@@ -18,7 +22,7 @@ DATA_CONFIG:
             - { NAME: ToTensor }
 
 MODEL:
-    NAME: AverageAEPSMNet # [NeuralAEPSMNet] [GardientAEPSMNet] [AverageAEPSMNet] [StereoAEPSMNet]
+    NAME: StereoAEPSMNet # [NeuralAEPSMNet] [GardientAEPSMNet] [AverageAEPSMNet] [StereoAEPSMNet] [PSMNet]
     MAX_DISP: &max_disp 192
     FIND_UNUSED_PARAMETERS: false
     CKPT: -1

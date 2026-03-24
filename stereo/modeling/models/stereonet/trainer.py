@@ -1,10 +1,12 @@
 from stereo.modeling.trainer_template import TrainerTemplate
 # from .average_ae import AverageAEGwcNet
-from .stereo_ae_2 import StereoAEGwcNet
+from .stereo_ae_2 import StereoAEGwcNet, StereoAEPSMNet
+# from .stereo_ae import StereoAEGwcNet
 
 
 __all__ = {
     'StereoAEGwcNet': StereoAEGwcNet,
+    'StereoAEPSMNet': StereoAEPSMNet,
 }
 
 

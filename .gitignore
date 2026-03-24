@@ -5,9 +5,8 @@
 data/*/*.txt
 cfgs/*/*stereocarla.yaml
 
-cfgs/foundationstereo/fstereo_*.yaml
+ref_code/
 output/
 img_out/
 CKPT/
-cfgs/foundationstereo/fstereo_combine.yaml
 tmp_code.py

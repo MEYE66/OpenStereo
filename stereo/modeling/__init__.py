@@ -26,6 +26,7 @@ from .models.gradnet.trainer_psmnet import RLTrainer as RLGardientAEPSMNetTraine
 from .models.neuralnet.trainer_gwcnet import Trainer as NeuralAEGwcNetTrainer
 from .models.neuralnet.trainer_psmnet import Trainer as NeuralAEPSMNetTrainer
 from .models.stereonet.trainer import Trainer as StereoAEGwcNetTrainer
+from .models.stereonet.trainer import Trainer as StereoAEPSMNetTrainer
 
 # try:
 # 'If you want to train/eval NMRF-Stereo, please refer to docs/prepare_foundationstereo.md
@@ -72,11 +73,14 @@ __all__ = {
     "GradientAEGwcNet": GradientAEGwcNetTrainer,
     "NeuralAEGwcNet": NeuralAEGwcNetTrainer,
     "StereoAEGwcNet": StereoAEGwcNetTrainer,
+    "RLGradientAEGwcNet": RLGradientAEGwcNetTrainer,
+
+    
     "AverageAEPSMNet": AverageAEPSMNetTrainer,
     "GardientAEPSMNet": GardientAEPSMNetTrainer,
-    "RLGardientAEPSMNet": RLGardientAEPSMNetTrainer,
     "NeuralAEPSMNet": NeuralAEPSMNetTrainer,
-    "RLGradientAEGwcNet": RLGradientAEGwcNetTrainer,
+    "StereoAEPSMNet": StereoAEPSMNetTrainer,
+    "RLGardientAEPSMNet": RLGardientAEPSMNetTrainer,
 
     # Sequence AE variants
     'GwcSequenceNet': GwcNetSequenceTrainer,

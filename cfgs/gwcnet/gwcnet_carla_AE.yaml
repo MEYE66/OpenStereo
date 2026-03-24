@@ -9,6 +9,7 @@ DATA_CONFIG:
             RETURN_RIGHT_DISP: false
             MAX_DISP: 192
             MINMAX_NORM: true
+            ADD_NOISE: true # only enable for GwcNet
 
     DATA_TRANSFORM:
         TRAINING:
@@ -22,7 +23,7 @@ DATA_CONFIG:
             - { NAME: ToTensor }
             # - { NAME: NormalizeImage, MEAN: [ 0.485, 0.456, 0.406 ], STD: [ 0.229, 0.224, 0.225 ] }`
 MODEL:
-    NAME: StereoAEGwcNet # [NeuralAEGwcNet] [GradientAEGwcNet] [AverageAEGwcNet] [StereoAEGwcNet]
+    NAME: GwcNet # [NeuralAEGwcNet] [GradientAEGwcNet] [AverageAEGwcNet] [StereoAEGwcNet] [GwcNet]
     MAX_DISP: &max_disp 192
     USE_CONCAT_VOLUME: true
     CONCAT_CHANNELS: 12

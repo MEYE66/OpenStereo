@@ -98,6 +98,23 @@ class CarlaStereoDataset(DatasetTemplate):
         self.max_disp = getattr(self.data_info, 'MAX_DISP', 192)
         self.minmax_norm = getattr(self.data_info, 'MINMAX_NORM', True)
         self.add_noise = getattr(self.data_info, 'ADD_NOISE', False)
+        self.gaussian_var = getattr(self.data_info, 'GAUSSIAN_VAR', 3.0e-5)
+        self.poisson_scale = getattr(self.data_info, 'POISSON_SCALE', 3.3e-4)
+
+    def apply_noise(self, image):
+        gauss_std = np.sqrt(self.gaussian_var) 
+        # Shot noise
+        shot_noise = np.random.poisson(image / self.poisson_scale) * self.poisson_scale 
+        # Readout noise
+        readout_noise = gauss_std * np.random.randn(*image.shape) 
+        # ADC noise
+        adc_noise = gauss_std * np.random.randn(*image.shape)
+
+        noise_image = shot_noise + readout_noise + adc_noise
+        noise_image = np.clip(noise_image, 0.0, None)
+        return noise_image
+
+
 
     def __getitem__(self, idx):
         item = self.data_list[idx]
@@ -112,9 +129,9 @@ class CarlaStereoDataset(DatasetTemplate):
             left_img = radiance_scale(left_img, capacity=1.0)
             right_img = radiance_scale(right_img, capacity=1.0)
 
-        # if self.add_noise:
-        #     left_img = self.apply_noise(left_img)
-        #     right_img = self.apply_noise(right_img)
+        if self.add_noise:
+            left_img = self.apply_noise(left_img)
+            right_img = self.apply_noise(right_img)
 
         left_disp = _load_disparity(disp_path)
         occ_mask = np.zeros_like(left_disp, dtype=bool)
@@ -134,7 +151,6 @@ class CarlaStereoDataset(DatasetTemplate):
 
 if __name__ == '__main__':
     import argparse
-    from torch.utils.data import DataLoader
 
     parser = argparse.ArgumentParser(description='Test CarlaStereoDataset')
     parser.add_argument('--data_root', type=str, default="/home/lgz/dataset/ADEC/carla/" ,help='Root directory of the dataset')
@@ -150,6 +166,7 @@ if __name__ == '__main__':
         },
         MAX_DISP=192,
         MINMAX_NORM=True,
+        ADD_NOISE=True,
     )
     data_cfg = SimpleNamespace(
         DATA_TRANSFORM={
@@ -162,13 +179,25 @@ if __name__ == '__main__':
     dataset = CarlaStereoDataset(data_info=data_info, data_cfg=data_cfg, mode='training')
     
     print(f"Dataset length: {len(dataset)}")
-    sample = dataset[0]
+    sample = dataset[1]
     print('Sample keys:', sample.keys())
     print('Left image shape:', sample['left'].shape, sample['left'].min(), sample['left'].max(), sample['left'].mean() )
     print('Right image shape:', sample['right'].shape, sample['right'].min(), sample['right'].max(), sample['right'].mean() )
     print('Disparity shape:', sample['disp'].shape, sample['disp'].min(), sample['disp'].max(), sample['disp'].mean() )
     print('Occ mask shape:', sample['occ_mask'].shape, sample['occ_mask'].min(), sample['occ_mask'].max(), sample['occ_mask'].mean() )
-    
+
+
+    left_img = sample['left']
+    right_img = sample['right']
+    left_img = _safe_minmax_normalize(left_img)
+    right_img = _safe_minmax_normalize(right_img)
+    left_img = np.clip(left_img*255, 0, 255).astype(np.uint8)
+    right_img = np.clip(right_img*255, 0, 255).astype(np.uint8)
+    disp_img = np.clip(_safe_minmax_normalize(sample['disp'])  * 255, 0, 255).astype(np.uint8)
+    cv2.imwrite('test_disp.png', cv2.applyColorMap(disp_img, cv2.COLORMAP_M))
+    cv2.imwrite('test_left.png', cv2.cvtColor(left_img, cv2.COLOR_RGB2BGR))
+    cv2.imwrite('test_right.png', cv2.cvtColor(right_img, cv2.COLOR_RGB2BGR))
+    print("Saved test_left.png and test_right.png for visual inspection.")
     # dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
     # for batch in dataloader:
     #     print('Batch keys:', batch.keys())

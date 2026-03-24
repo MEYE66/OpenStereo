@@ -37,7 +37,7 @@ MODEL:
     RL_INIT_LOG_STD: -1.0
     FIND_UNUSED_PARAMETERS: false
     CKPT: -1 # output/benchmark/CarlaStereoDataset/GwcNet/gwcnet_carla_AE/default/ckpt/checkpoint_epoch_19.pth
-    PRETRAINED_MODEL: '/home/lgz/workspace/OpenStereo/output/benchmark/CarlaStereoDataset/GwcNet/gwcnet_carla_AE/default/ckpt/checkpoint_epoch_19.pth'
+    PRETRAINED_MODEL: '/home/lgz/workspace/OpenStereo/output/CarlaStereoDataset/GwcNet/gwcnet_carla_AE/default/ckpt/checkpoint_epoch_19.pth'
 
 
 OPTIMIZATION:
