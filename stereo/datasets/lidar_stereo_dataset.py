@@ -1,3 +1,4 @@
+import cv2
 import os
 import sys
 import numpy as np
@@ -104,6 +105,40 @@ def _plot_lidar_points(points, image_left, save_path, vmax=20000):
     plt.close(fig)
 
 
+def _get_image_hw(image):
+    if image.ndim != 3:
+        raise ValueError('left image must be 3D, got shape: ' + str(image.shape))
+
+    # Support both HWC (numpy) and CHW (after transpose/to-tensor style transforms).
+    if image.shape[0] in (1, 3) and image.shape[-1] not in (1, 3):
+        return int(image.shape[1]), int(image.shape[2])
+    return int(image.shape[0]), int(image.shape[1])
+
+
+def _build_dense_valid_mask(points, height, width, depth_thres=15000.0):
+    valid = np.zeros((height, width), dtype=bool)
+    if hasattr(points, 'detach'):
+        pts = points.detach().cpu().numpy()
+    else:
+        pts = np.asarray(points)
+    if pts.size == 0:
+        return valid
+    pts = pts.reshape(-1, 3)
+    mask = pts[:, 2] < depth_thres
+    if not np.any(mask):
+        return valid
+
+    u = pts[:, 0][mask].astype(np.int64)
+    v = pts[:, 1][mask].astype(np.int64)
+
+    valid_uv = (u >= 0) & (u < width) & (v >= 0) & (v < height)
+    if not np.any(valid_uv):
+        return valid
+
+    valid[v[valid_uv], u[valid_uv]] = True
+    return valid
+
+
 
 class LidarStereoDataset(DatasetTemplate):
     def __init__(self, data_info, data_cfg, mode):
@@ -116,6 +151,7 @@ class LidarStereoDataset(DatasetTemplate):
         self.image_width = getattr(self.data_info, 'IMAGE_WIDTH', 1440)
         self.image_height = getattr(self.data_info, 'IMAGE_HEIGHT', 928)
         self.point_scale = getattr(self.data_info, 'POINT_SCALE', 1000.0)
+        self.valid_depth_thres = getattr(self.data_info, 'VALID_DEPTH_THRES', 15000.0)
         self.transform_mtx = np.array([
             [9.74168269e-01, -2.16619390e-02, -2.24781992e-01, 3.68182351e+01],
             [2.23991311e-01, -3.38457838e-02, 9.74003263e-01, 2.71851960e+02],
@@ -123,14 +159,21 @@ class LidarStereoDataset(DatasetTemplate):
             [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00],
         ], dtype=np.float32)
 
+        self.training = (mode == 'training')
 
     def __getitem__(self, idx):
         item = self.data_list[idx]
         full_paths = [os.path.join(self.root, x) for x in item]
         left_path, right_path, points_path = full_paths
 
-        left_img = _load_rectified_image(left_path)
-        right_img = _load_rectified_image(right_path)
+        if self.training:
+
+            left_img = _load_rectified_image(left_path)
+            right_img = _load_rectified_image(right_path)
+
+        left_img = cv2.cvtColor(left_img, cv2.COLOR_BGR2RGB)
+        right_img = cv2.cvtColor(right_img, cv2.COLOR_BGR2RGB)
+
         points = _load_points(points_path) * self.point_scale
         points = _transform_points_inverse(points, self.transform_mtx)
         points = _project_points_on_camera(
@@ -151,6 +194,14 @@ class LidarStereoDataset(DatasetTemplate):
         }
         if self.transform is not None:
             sample = self.transform(sample)
+
+        h, w = _get_image_hw(sample['left'])
+        sample['valid'] = _build_dense_valid_mask(
+            sample['points'],
+            height=h,
+            width=w,
+            depth_thres=self.valid_depth_thres,
+        )
         sample['index'] = idx
         sample['name'] = left_path
         return sample
@@ -161,7 +212,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Test LidarStereoDataset')
     parser.add_argument('--data_root', type=str, default="/home/lgz/dataset/ADEC/real", help='Root directory of the dataset')
-    parser.add_argument('--split_file', type=str, default="/home/lgz/workspace/OpenStereo/dataset_split/lidar_stereo/val.txt", help='Path to the split file')
+    parser.add_argument('--split_file', type=str, default="/home/lgz/workspace/OpenStereo/dataset_split/lidar_stereo/train~.txt", help='Path to the split file')
     parser.add_argument('--vis_out', type=str, default='lidar_points_check.png', help='Output path for lidar projection validation image')
     args = parser.parse_args()
 
@@ -179,6 +230,7 @@ if __name__ == '__main__':
         IMAGE_WIDTH=1440,
         IMAGE_HEIGHT=928,
         POINT_SCALE=1000.0,
+        VALID_DEPTH_THRES=15000.0,
     )
     data_cfg = SimpleNamespace(
         DATA_TRANSFORM={
@@ -191,11 +243,12 @@ if __name__ == '__main__':
     dataset = LidarStereoDataset(data_info=data_info, data_cfg=data_cfg, mode='training')
     
     print(f"Dataset length: {len(dataset)}")
-    sample = dataset[0]
+    sample = dataset[200]
     print('Sample keys:', sample.keys())
     print('Left image shape:', sample['left'].shape, sample['left'].min(), sample['left'].max())
     print('Right image shape:', sample['right'].shape, sample['right'].min(), sample['right'].max())
     print('Points shape:', sample['points'].shape)
+    print('Valid mask shape:', sample['valid'].shape, sample['valid'].dtype, sample['valid'].mean())
     print('Focal length:', sample['focal_length'])
     print('Baseline:', sample['baseline'])
 
