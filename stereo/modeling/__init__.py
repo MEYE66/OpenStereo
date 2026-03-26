@@ -71,6 +71,7 @@ __all__ = {
     # Stereo AE variants
     "AverageAEGwcNet": AverageAEGwcNetTrainer,
     "GradientAEGwcNet": GradientAEGwcNetTrainer,
+    "GradientAELidarGwcNet": GradientAEGwcNetTrainer,
     "NeuralAEGwcNet": NeuralAEGwcNetTrainer,
     "StereoAEGwcNet": StereoAEGwcNetTrainer,
     "RLGradientAEGwcNet": RLGradientAEGwcNetTrainer,
@@ -84,6 +85,9 @@ __all__ = {
 
     # Sequence AE variants
     'GwcSequenceNet': GwcNetSequenceTrainer,
+
+    # Lidar sparse-supervision variant
+    'LidarGwcNet': GwcNetTrainer,
 
 }   
 

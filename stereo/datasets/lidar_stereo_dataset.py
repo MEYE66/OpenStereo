@@ -115,28 +115,39 @@ def _get_image_hw(image):
     return int(image.shape[0]), int(image.shape[1])
 
 
-def _build_dense_valid_mask(points, height, width, depth_thres=15000.0):
-    valid = np.zeros((height, width), dtype=bool)
+
+
+def _build_dense_disp_from_points(points, height, width, focal_length, baseline, depth_thres=15000.0):
+    disp = np.zeros((height, width), dtype=np.float32)
     if hasattr(points, 'detach'):
         pts = points.detach().cpu().numpy()
     else:
         pts = np.asarray(points)
     if pts.size == 0:
-        return valid
+        return disp
+
     pts = pts.reshape(-1, 3)
-    mask = pts[:, 2] < depth_thres
+    z = pts[:, 2]
+    mask = (z > 0) & (z < depth_thres)
     if not np.any(mask):
-        return valid
+        return disp
 
     u = pts[:, 0][mask].astype(np.int64)
     v = pts[:, 1][mask].astype(np.int64)
+    z = z[mask]
 
     valid_uv = (u >= 0) & (u < width) & (v >= 0) & (v < height)
     if not np.any(valid_uv):
-        return valid
+        return disp
 
-    valid[v[valid_uv], u[valid_uv]] = True
-    return valid
+    u = u[valid_uv]
+    v = v[valid_uv]
+    z = z[valid_uv]
+    disp_values = (baseline * focal_length) / (z + 1e-6)
+
+    # Multiple lidar points can map to one pixel; keep nearest depth (largest disparity).
+    np.maximum.at(disp, (v, u), disp_values.astype(np.float32))
+    return disp
 
 
 
@@ -150,6 +161,7 @@ class LidarStereoDataset(DatasetTemplate):
         self.cy = getattr(self.data_info, 'CY', 557.0)
         self.image_width = getattr(self.data_info, 'IMAGE_WIDTH', 1440)
         self.image_height = getattr(self.data_info, 'IMAGE_HEIGHT', 928)
+        self.max_disp = getattr(self.data_info, 'MAX_DISP', 192)
         self.point_scale = getattr(self.data_info, 'POINT_SCALE', 1000.0)
         self.valid_depth_thres = getattr(self.data_info, 'VALID_DEPTH_THRES', 15000.0)
         self.transform_mtx = np.array([
@@ -159,17 +171,13 @@ class LidarStereoDataset(DatasetTemplate):
             [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00],
         ], dtype=np.float32)
 
-        self.training = (mode == 'training')
-
     def __getitem__(self, idx):
         item = self.data_list[idx]
         full_paths = [os.path.join(self.root, x) for x in item]
         left_path, right_path, points_path = full_paths
 
-        if self.training:
-
-            left_img = _load_rectified_image(left_path)
-            right_img = _load_rectified_image(right_path)
+        left_img = _load_rectified_image(left_path)
+        right_img = _load_rectified_image(right_path)
 
         left_img = cv2.cvtColor(left_img, cv2.COLOR_BGR2RGB)
         right_img = cv2.cvtColor(right_img, cv2.COLOR_BGR2RGB)
@@ -185,23 +193,26 @@ class LidarStereoDataset(DatasetTemplate):
             image_height=self.image_height,
         )
 
+        h, w = _get_image_hw(left_img)
+        left_disp = _build_dense_disp_from_points(
+            points,
+            height=h,
+            width=w,
+            focal_length=self.focal_length,
+            baseline=self.baseline,
+            depth_thres=self.valid_depth_thres,
+        )
+        occ_mask = np.zeros_like(left_disp, dtype=bool)
+
         sample = {
             'left': left_img,
             'right': right_img,
-            'points': points,
-            'focal_length': self.focal_length,
-            'baseline': self.baseline
+            'disp': left_disp,
+            'occ_mask': occ_mask,
         }
         if self.transform is not None:
             sample = self.transform(sample)
-
-        h, w = _get_image_hw(sample['left'])
-        sample['valid'] = _build_dense_valid_mask(
-            sample['points'],
-            height=h,
-            width=w,
-            depth_thres=self.valid_depth_thres,
-        )
+        sample['valid'] = (sample['disp'] > 0) & (sample['disp'] < self.max_disp)
         sample['index'] = idx
         sample['name'] = left_path
         return sample
@@ -212,7 +223,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Test LidarStereoDataset')
     parser.add_argument('--data_root', type=str, default="/home/lgz/dataset/ADEC/real", help='Root directory of the dataset')
-    parser.add_argument('--split_file', type=str, default="/home/lgz/workspace/OpenStereo/dataset_split/lidar_stereo/train~.txt", help='Path to the split file')
+    parser.add_argument('--split_file', type=str, default="/home/lgz/workspace/OpenStereo/dataset_split/lidar_stereo/train.txt", help='Path to the split file')
     parser.add_argument('--vis_out', type=str, default='lidar_points_check.png', help='Output path for lidar projection validation image')
     args = parser.parse_args()
 
@@ -229,6 +240,7 @@ if __name__ == '__main__':
         CY=557.0,
         IMAGE_WIDTH=1440,
         IMAGE_HEIGHT=928,
+        MAX_DISP=192,
         POINT_SCALE=1000.0,
         VALID_DEPTH_THRES=15000.0,
     )
@@ -247,13 +259,25 @@ if __name__ == '__main__':
     print('Sample keys:', sample.keys())
     print('Left image shape:', sample['left'].shape, sample['left'].min(), sample['left'].max())
     print('Right image shape:', sample['right'].shape, sample['right'].min(), sample['right'].max())
-    print('Points shape:', sample['points'].shape)
-    print('Valid mask shape:', sample['valid'].shape, sample['valid'].dtype, sample['valid'].mean())
-    print('Focal length:', sample['focal_length'])
-    print('Baseline:', sample['baseline'])
+    print('Disparity shape:', sample['disp'].shape, sample['disp'].min(), sample['disp'].max())
+    # print('Occ mask shape:', sample['occ_mask'].shape, sample['occ_mask'].dtype)
+    print('Valid mask shape:', sample['valid'].shape, sample['valid'].dtype, sample['valid'].sum())
 
-    _plot_lidar_points(sample['points'], sample['left'], args.vis_out)
-    print('Saved lidar projection visualization to:', args.vis_out)
+
+
+    cv2.imwrite('sample_left.png', cv2.cvtColor(sample['left'], cv2.COLOR_RGB2BGR))
+    # points = _load_points(os.path.join(args.data_root, dataset.data_list[200][2])) * dataset.point_scale
+    # points = _transform_points_inverse(points, dataset.transform_mtx)
+    # points = _project_points_on_camera(
+    #     points,
+    #     focal_length=dataset.focal_length,
+    #     cx=dataset.cx,
+    #     cy=dataset.cy,
+    #     image_width=dataset.image_width,
+    #     image_height=dataset.image_height,
+    # )
+    # _plot_lidar_points(points, sample['left'], args.vis_out)
+    # print('Saved lidar projection visualization to:', args.vis_out)
     
     # dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
     # for batch in dataloader:

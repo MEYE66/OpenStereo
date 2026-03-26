@@ -142,6 +142,18 @@ def radiance_scale(radiance, capacity):
 
 
 
+
+def img_vis_test():
+    
+    root_path = "/home/lgz/dataset/ADEC/real/val/Test1"
+    # 测试图像可视化
+    img = np.random.rand(100, 100, 3) * 10  # 随机生成一个高动态范围图像
+    plt_img(img)
+
+
+
+
+
 if __name__ == '__main__':
     image_formation_model = ImageFormationModel()
 
@@ -171,21 +183,6 @@ if __name__ == '__main__':
     # left_img = inverse_mu_law(left_img, mu=3000.0, eps=1e-8)
     # right_img = inverse_mu_law(right_img, mu=3000.0, eps=1e-8)
     # left_img = apply_gtm(left_img)
-
-
-
-    # exp_time = 10
-    # gain = 10
-    # captured_left = image_formation_model.capture(left_img, exp_time, gain)
-    # captured_right = image_formation_model.capture(right_img, exp_time, gain)
-    # print("Captured left image shape:", captured_left.shape, captured_left.min(), captured_left.max())
-    # print("Captured right image shape:", captured_right.shape, captured_right.min(), captured_right.max())
-    # captured_left = np.clip(minmax_norm(left_img) * 255, 0, 255).astype(np.uint8)
-    # captured_right = np.clip(minmax_norm(right_img) * 255, 0, 255).astype(np.uint8)
-    # cv2.imwrite(f"./img_out/captured_left_image_{id}.png", cv2.cvtColor(captured_left, cv2.COLOR_RGB2BGR))
-    # cv2.imwrite(f"./img_out/captured_right_image_{id}.png", cv2.cvtColor(captured_right, cv2.COLOR_RGB2BGR))
-    # left_img = minmax_norm(left_img) 
-    # right_img = minmax_norm(right_img)
 
     left_img = inverse_mu_law(left_img, mu=100.0, eps=1e-8)
     right_img = inverse_mu_law(right_img, mu=500.0, eps=1e-8)

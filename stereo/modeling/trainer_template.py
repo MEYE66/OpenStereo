@@ -95,7 +95,7 @@ class TrainerTemplate:
 
         # load pretrained model
         if self.cfgs.MODEL.PRETRAINED_MODEL:
-            print("!!!! Loading Paramters from pretrained model %s !!!!" % self.cfgs.MODEL.PRETRAINED_MODEL)
+            # print("!!!! Loading Paramters from pretrained model %s !!!!" % self.cfgs.MODEL.PRETRAINED_MODEL)
             self.logger.info('Loading parameters from checkpoint %s' % self.cfgs.MODEL.PRETRAINED_MODEL)
             if not os.path.isfile(self.cfgs.MODEL.PRETRAINED_MODEL):
                 raise FileNotFoundError

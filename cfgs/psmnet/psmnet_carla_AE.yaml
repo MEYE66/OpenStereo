@@ -4,7 +4,7 @@ DATA_CONFIG:
             DATA_SPLIT: {
                 TRAINING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/train.txt,
                 EVALUATING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/val.txt,
-                TESTING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/test.txt
+                TESTING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/val.txt
             }
             RETURN_RIGHT_DISP: false
             MAX_DISP: 192
@@ -20,9 +20,9 @@ DATA_CONFIG:
             - { NAME: RightTopPad, SIZE: [ 608, 800 ] }
             - { NAME: TransposeImage }
             - { NAME: ToTensor }
-
+# DONE: StereoPSMNet GardientAEPSMNet NeuralAEPSMNet
 MODEL:
-    NAME: StereoAEPSMNet # [NeuralAEPSMNet] [GardientAEPSMNet] [AverageAEPSMNet] [StereoAEPSMNet] [PSMNet]
+    NAME: AverageAEPSMNet # [NeuralAEPSMNet] [GardientAEPSMNet] [AverageAEPSMNet] [StereoAEPSMNet] [PSMNet]
     MAX_DISP: &max_disp 192
     FIND_UNUSED_PARAMETERS: false
     CKPT: -1

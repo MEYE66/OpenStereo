@@ -1,28 +1,28 @@
 DATA_CONFIG:
     DATA_INFOS:
-        -   DATASET: CarlaStereoHDRDataset
+        -   DATASET: LidarStereoDataset
             DATA_SPLIT: {
-                TRAINING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/train.txt,
-                EVALUATING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/val.txt,
-                TESTING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/test.txt
+                TRAINING: /home/lgz/workspace/OpenStereo/dataset_split/lidar_stereo/train.txt,
+                EVALUATING: /home/lgz/workspace/OpenStereo/dataset_split/lidar_stereo/val.txt,
+                TESTING: /home/lgz/workspace/OpenStereo/dataset_split/lidar_stereo/val.txt
             }
             RETURN_RIGHT_DISP: false
-            MINMAX_NORM: true
+            MAX_DISP: 192
+            VALID_DEPTH_THRES: 15000.0
 
     DATA_TRANSFORM:
         TRAINING:
-            - { NAME: RandomCrop, SIZE: [ 512, 512 ], Y_JITTER: false }
+            - { NAME: RandomCrop, SIZE: [ 480,736 ], Y_JITTER: false }
             - { NAME: TransposeImage }
             - { NAME: ToTensor }
             # - { NAME: NormalizeImage, MEAN: [ 0.485, 0.456, 0.406 ], STD: [ 0.229, 0.224, 0.225 ] }
         EVALUATING:
-            - { NAME: RightTopPad, SIZE: [ 608, 800 ] }
+            # - { NAME: RightTopPad, SIZE: [ 928, 1440 ] }
             - { NAME: TransposeImage }
             - { NAME: ToTensor }
-            # - { NAME: NormalizeImage, MEAN: [ 0.485, 0.456, 0.406 ], STD: [ 0.229, 0.224, 0.225 ] }
-
+            # - { NAME: NormalizeImage, MEAN: [ 0.485, 0.456, 0.406 ], STD: [ 0.229, 0.224, 0.225 ] }`
 MODEL:
-    NAME: GwcNet # [IAGwcNet] [RAODGwcNet] [SANGwcNet] [GamutGwcNet] [GwcNet]
+    NAME: GradientAELidarGwcNet # [NeuralAEGwcNet] [GradientAEGwcNet] [AverageAEGwcNet] [StereoAEGwcNet] [GradientAELidarGwcNet]
     MAX_DISP: &max_disp 192
     USE_CONCAT_VOLUME: true
     CONCAT_CHANNELS: 12
@@ -30,11 +30,10 @@ MODEL:
     NUM_GROUPS: 40
     FIND_UNUSED_PARAMETERS: false
     CKPT: -1
-    PRETRAINED_MODEL: ''
-
+    PRETRAINED_MODEL: 'output/CarlaStereoDataset/GradientAEGwcNet/gwcnet_carla_AE/default/ckpt/checkpoint_epoch_19.pth'
 
 OPTIMIZATION:
-    BATCH_SIZE_PER_GPU: 4
+    BATCH_SIZE_PER_GPU: 4 # 6 default
     FREEZE_BN: false
     SYNC_BN: true
     AMP: false
@@ -42,7 +41,8 @@ OPTIMIZATION:
 
     OPTIMIZER:
         NAME: AdamW
-        LR: &lr 0.0015
+        # LR: &lr 0.0015
+        LR: &lr 0.0005
 
     SCHEDULER:
         NAME: OneCycleLR
@@ -55,9 +55,8 @@ OPTIMIZATION:
         MAX_NORM: 35
         NORM_TYPE: 2
 
-
 EVALUATOR:
-    BATCH_SIZE_PER_GPU: 4
+    BATCH_SIZE_PER_GPU: 1
     MAX_DISP: *max_disp
     METRIC:
         - d1_all

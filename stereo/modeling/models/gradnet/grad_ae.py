@@ -14,13 +14,18 @@ if str(repo_root) not in sys.path:
 try:
     from stereo.modeling.models.ae_util import _cfg_get, ExposureControlMixin
     from stereo.modeling.models.gwcnet.gwcnet import GwcNet as BaseGwcNet
-    from stereo.modeling.models.gwcnet.gwcnet_sequence import GwcSequenceNet
+    from stereo.modeling.models.gwcnet.gwcnet_lidar_sparse import LidarGwcNet
     from stereo.modeling.models.psmnet.psmnet import PSMNet as BasePSMNet
+    from stereo.modeling.models.gwcnet.gwcnet_sequence import GwcSequenceNet
+
 except ModuleNotFoundError:
     from ..ae_util import _cfg_get, ExposureControlMixin
     from ..gwcnet.gwcnet import GwcNet as BaseGwcNet
-    from ..gwcnet.gwcnet_sequence import GwcSequenceNet
+    from ..gwcnet.gwcnet_lidar_sparse import LidarGwcNet
     from ..psmnet.psmnet import PSMNet as BasePSMNet
+
+    from ..gwcnet.gwcnet_sequence import GwcSequenceNet
+
 
 
 
@@ -64,6 +69,22 @@ class GradientAEGwcNet(GradientExposureControlMixin, BaseGwcNet):
 
     def _forward_stereo(self, left_img, right_img):
         return super(GradientAEGwcNet, self).forward({'left': left_img, 'right': right_img})
+
+    def forward(self, inputs):
+        radiance_left, radiance_right = inputs['left'], inputs['right']
+        seed_left, seed_right = self._build_seed_images(radiance_left, radiance_right)
+        exposure = self.exposure_controller(self._build_state(seed_left, seed_right))
+        act_left, act_right = self._apply_exposure(radiance_left, radiance_right, exposure)
+        return self._forward_stereo(act_left, act_right)
+
+
+class GradientAELidarGwcNet(GradientExposureControlMixin, LidarGwcNet):
+    def __init__(self, cfgs, time_limits=(1.0, 20.0), gain_limits=(1.0, 14.0)):
+        super(GradientAELidarGwcNet, self).__init__(cfgs)
+        self._init_exposure_control(cfgs, default_time_limits=time_limits, default_gain_limits=gain_limits)
+
+    def _forward_stereo(self, left_img, right_img):
+        return LidarGwcNet.forward(self, {'left': left_img, 'right': right_img})
 
     def forward(self, inputs):
         radiance_left, radiance_right = inputs['left'], inputs['right']

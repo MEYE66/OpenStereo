@@ -25,7 +25,7 @@ def apply_gtm(img, eps=1e-6, param=0.18):
     Lm = (param / Lw_ave) * img
     Lm_max = np.max(Lm)
     out = (Lm * (1 + (Lm / (Lm_max ** 2)))) / (1 + Lm)
-    # out = np.clip(out, 0, 1.).astype(np.float32)
+    out = np.clip(out, 0, 1.).astype(np.float32)
     return out
 
 
@@ -97,6 +97,7 @@ class CarlaStereoDataset(DatasetTemplate):
         super().__init__(data_info, data_cfg, mode)
         self.max_disp = getattr(self.data_info, 'MAX_DISP', 192)
         self.minmax_norm = getattr(self.data_info, 'MINMAX_NORM', True)
+        self.enable_ldr = getattr(self.data_info, 'ENABLE_LDR', False)
         self.add_noise = getattr(self.data_info, 'ADD_NOISE', False)
         self.gaussian_var = getattr(self.data_info, 'GAUSSIAN_VAR', 3.0e-5)
         self.poisson_scale = getattr(self.data_info, 'POISSON_SCALE', 3.3e-4)
@@ -128,6 +129,10 @@ class CarlaStereoDataset(DatasetTemplate):
             # right_img = _safe_minmax_normalize(right_img)
             left_img = radiance_scale(left_img, capacity=1.0)
             right_img = radiance_scale(right_img, capacity=1.0)
+        
+        if self.enable_ldr:
+            left_img = apply_gtm(left_img)
+            right_img = apply_gtm(right_img)
 
         if self.add_noise:
             left_img = self.apply_noise(left_img)
