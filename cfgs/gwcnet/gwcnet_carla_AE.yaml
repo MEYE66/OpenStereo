@@ -9,8 +9,8 @@ DATA_CONFIG:
             RETURN_RIGHT_DISP: false
             MAX_DISP: 192
             MINMAX_NORM: true
-            ADD_NOISE: false # only enable for GwcNet
-            ENABLE_LDR: true # only enable for GwcNet
+            ADD_NOISE: true # only enable for GwcNet
+            ENABLE_LDR: false # only enable for GwcNet
 
 
     DATA_TRANSFORM:

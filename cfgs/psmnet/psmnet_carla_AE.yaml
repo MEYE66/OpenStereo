@@ -10,6 +10,7 @@ DATA_CONFIG:
             MAX_DISP: 192
             MINMAX_NORM: true
             ADD_NOISE: false # only enable for PSMNet
+            ENABLE_LDR: true # only enable for PSMNet
 
     DATA_TRANSFORM:
         TRAINING:
@@ -20,9 +21,9 @@ DATA_CONFIG:
             - { NAME: RightTopPad, SIZE: [ 608, 800 ] }
             - { NAME: TransposeImage }
             - { NAME: ToTensor }
-# DONE: StereoPSMNet GardientAEPSMNet NeuralAEPSMNet
+# DONE: StereoPSMNet GardientAEPSMNet NeuralAEPSMNet AverageAEPSMNet
 MODEL:
-    NAME: AverageAEPSMNet # [NeuralAEPSMNet] [GardientAEPSMNet] [AverageAEPSMNet] [StereoAEPSMNet] [PSMNet]
+    NAME: PSMNet # [NeuralAEPSMNet] [GardientAEPSMNet] [AverageAEPSMNet] [StereoAEPSMNet] [PSMNet]
     MAX_DISP: &max_disp 192
     FIND_UNUSED_PARAMETERS: false
     CKPT: -1

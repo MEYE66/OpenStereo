@@ -1,0 +1,131 @@
+# Modified configuration for RL training with normalization
+# Key changes for stability:
+# - NORMALIZE_REWARDS: true (standardize reward signals)
+# - Action penalty added: 0.01 (prevent extreme actions)
+# - Reduced action scale: 0.5 (smaller action steps)
+# - Strict gradient clipping: 2.0 (prevent exploding gradients)
+# - GAE_LAMBDA explicit: 0.95 (advantage estimation smoothing)
+# - CRITIC_LR reduced: 0.0003 (prevent critic divergence)
+
+DATA_CONFIG:
+    DATA_INFOS:
+        -   DATASET: CarlaStereoDataset
+            DATA_SPLIT: {
+                TRAINING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/train.txt,
+                # TRAINING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/test.txt,
+                EVALUATING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/test.txt,
+                TESTING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/test.txt
+            }
+            RETURN_RIGHT_DISP: false
+            MAX_DISP: 192
+            MINMAX_NORM: true
+            ADD_NOISE: false
+            ENABLE_LDR: false
+
+    DATA_TRANSFORM:
+        TRAINING:
+            - { NAME: RandomCrop, SIZE: [ 512, 512 ], Y_JITTER: false }
+            - { NAME: TransposeImage }
+            - { NAME: ToTensor }
+        EVALUATING:
+            - { NAME: RightTopPad, SIZE: [ 608, 800 ] }
+            - { NAME: TransposeImage }
+            - { NAME: ToTensor }
+
+MODEL:
+    NAME: RLOurAEGwcNet
+    MAX_DISP: &max_disp 192
+    USE_CONCAT_VOLUME: true
+    CONCAT_CHANNELS: 12
+    DOWNSAMPLE: 4
+    NUM_GROUPS: 40
+    TIME_LIMITS: [ 5.0, 20.0 ]
+    GAIN_LIMITS: [ 1.0, 14.0 ]
+    INIT_TIME: [ 12.5, 12.5 ]
+    INIT_GAIN: [ 7.5, 7.5 ]
+    RL_ACTION_SCALE: 0.5
+    RL_HIDDEN_DIM: 32
+    RL_INIT_LOG_STD: -1.0
+    RL_INPUT_SIZE: 128
+    RL_FEATURE_DIM: 32
+    FIND_UNUSED_PARAMETERS: false
+    CKPT: -1
+    PRETRAINED_MODEL: '/home/lgz/workspace/OpenStereo/output/baseline/GwcNet/gwcnet_carla_AE/default/ckpt/checkpoint_epoch_19.pth'
+
+RL:
+    ROLLOUT_STEPS: 3
+    GAMMA: 0.99
+    GAE_LAMBDA: 0.95
+    NORMALIZE_REWARDS: true
+    REWARD_NORM_EPS: 1.0e-8
+    ACTION_PENALTY_WEIGHT: 0.01
+    ENTROPY_WEIGHT: 0.001
+    ACTOR_LOSS_WEIGHT: 1.0
+    CRITIC_LOSS_WEIGHT: 0.25
+    DISP_LOSS_WEIGHT: 1.0
+    TRAIN_STEREO: false
+    UNFREEZE_EPOCH: -1
+    DETERMINISTIC_EVAL: true
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 16
+    FREEZE_BN: false
+    SYNC_BN: true
+    AMP: false
+    NUM_EPOCHS: 20
+
+    ACTOR_OPTIMIZER:
+        NAME: AdamW
+        LR: 0.0003
+        WEIGHT_DECAY: 0.0001
+
+    CRITIC_OPTIMIZER:
+        NAME: AdamW
+        LR: 0.0003
+        WEIGHT_DECAY: 0.0001
+
+    STEREO_OPTIMIZER:
+        NAME: AdamW
+        LR: 0.0015
+        WEIGHT_DECAY: 0.0001
+
+    ACTOR_SCHEDULER:
+        NAME: OneCycleLR
+        MAX_LR: 0.0003
+        PCT_START: 0.01
+        ON_EPOCH: False
+
+    CRITIC_SCHEDULER:
+        NAME: OneCycleLR
+        MAX_LR: 0.0003
+        PCT_START: 0.01
+        ON_EPOCH: False
+
+    STEREO_SCHEDULER:
+        NAME: OneCycleLR
+        MAX_LR: 0.0015
+        PCT_START: 0.01
+        ON_EPOCH: False
+
+    CLIP_GRAD:
+        TYPE: norm
+        MAX_NORM: 2.0
+        NORM_TYPE: 2
+
+EVALUATOR:
+    BATCH_SIZE_PER_GPU: 8
+    MAX_DISP: *max_disp
+    METRIC:
+        - d1_all
+        - epe
+        - thres_1
+        - thres_2
+        - thres_3
+
+TRAINER:
+    EVAL_INTERVAL: 1
+    CKPT_SAVE_INTERVAL: 30
+    MAX_CKPT_SAVE_NUM: 30
+    LOGGER_ITER_INTERVAL: 100
+    TRAIN_VISUALIZATION: False
+    EVAL_VISUALIZATION: True
