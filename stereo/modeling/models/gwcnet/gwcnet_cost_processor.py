@@ -10,7 +10,7 @@ class GwcVolumeCostProcessor(nn.Module):
         self.num_groups = num_groups
         self.use_concat_volume = use_concat_volume
 
-    def groupwise_correlation(self, fea1, fea2, similarity_type='None'):
+    def groupwise_correlation(self, fea1, fea2, similarity_type='ncc'):
         B, C, H, W = fea1.shape
         num_groups = self.num_groups
         assert C % num_groups == 0

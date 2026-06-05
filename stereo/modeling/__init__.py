@@ -11,6 +11,7 @@ from .models.gwcnet.trainer import SequenceTrainer as GwcNetSequenceTrainer
 
 from .models.msnet.trainer import Trainer as MSNetTrainer
 from .models.psmnet.trainer import Trainer as PSMNetTrainer
+from .models.raftstereo.trainer import Trainer as RAFTStereoTrainer
 from .models.sttr.trainer import Trainer as STTRTrainer
 # from .models.lightstereo.trainer import Trainer as LightStereoTrainer
 # from .models.stereobase.trainer import Trainer as StereoBaseGRUTrainer
@@ -20,13 +21,25 @@ from .models.sttr.trainer import Trainer as STTRTrainer
 from .models.avenet.trainer_gwcnet import Trainer as AverageAEGwcNetTrainer
 from .models.avenet.trainer_psmnet import Trainer as AverageAEPSMNetTrainer
 from .models.gradnet.trainer_gwcnet import Trainer as GradientAEGwcNetTrainer
-from .models.gradnet.trainer_gwcnet import RLTrainer as RLGradientAEGwcNetTrainer
+from .models.gradnet.trainer_gwcnet import FinetuneTrainer as FinetuneGradientAEGwcNetTrainer
 from .models.gradnet.trainer_psmnet import Trainer as GardientAEPSMNetTrainer
-from .models.gradnet.trainer_psmnet import RLTrainer as RLGardientAEPSMNetTrainer
-from .models.neuralnet.trainer_gwcnet import Trainer as NeuralAEGwcNetTrainer
-from .models.neuralnet.trainer_psmnet import Trainer as NeuralAEPSMNetTrainer
+from .models.gradnet.trainer_psmnet import FinetuneTrainer as FinetuneGardientAEPSMNetTrainer
+
+from .models.naenet.trainer_nae import Trainer as NeuralAERAFTStereoDualTrainer
+from .models.naenet.trainer_nae import FinetuneTrainer as NeuralAERAFTStereoDualFinetuneTrainer
+# from .models.attnet.trainer_gwcnet import Trainer as AttAEGwcNetTrainer
+from .models.attnet.trainer_gwcnet import FinetuneTrainer as AttAEGwcNetTrainer
+# from .models.attnet.trainer_psmnet import Trainer as AttAEPSMNetTrainer
+from .models.attnet.trainer_psmnet import FinetuneTrainer as AttAEPSMNetTrainer
+
+
 from .models.stereonet.trainer import Trainer as StereoAEGwcNetTrainer
 from .models.stereonet.trainer import Trainer as StereoAEPSMNetTrainer
+
+
+from .models.adpaenet.trainer import RLTrainer as AdpAENetTrainer
+from .models.adaptiveaenet.trainer import RLTrainer as AdaptiveAENetTrainer
+
 
 # try:
 # 'If you want to train/eval NMRF-Stereo, please refer to docs/prepare_foundationstereo.md
@@ -44,6 +57,10 @@ from .models.stereonet.trainer import Trainer as StereoAEPSMNetTrainer
 __all__ = {
     'STTR': STTRTrainer,
     'PSMNet': PSMNetTrainer,
+    'RAFTStereo': RAFTStereoTrainer,
+    'RAFTStereoDual': RAFTStereoTrainer,
+    'RAFTStereoFusionDual': RAFTStereoTrainer,
+    'RAFT_Stereo': RAFTStereoTrainer,
     'MSNet2D': MSNetTrainer,
     'MSNet3D': MSNetTrainer,
     'GwcNet': GwcNetTrainer,
@@ -72,16 +89,26 @@ __all__ = {
     "AverageAEGwcNet": AverageAEGwcNetTrainer,
     "GradientAEGwcNet": GradientAEGwcNetTrainer,
     "GradientAELidarGwcNet": GradientAEGwcNetTrainer,
-    "NeuralAEGwcNet": NeuralAEGwcNetTrainer,
+    "GradientAEGwcNetFinetune": FinetuneGradientAEGwcNetTrainer,
+    "GradientAELidarGwcNetFinetune": FinetuneGradientAEGwcNetTrainer,
+    "NeuralAERAFTStereoDual": NeuralAERAFTStereoDualTrainer,
+    "NeuralAERAFTStereoDualFinetune": NeuralAERAFTStereoDualFinetuneTrainer,
+    # "AttAEGwcNet": AttAEGwcNetTrainer,
+    "AttAEGwcNet": AttAEGwcNetTrainer,
     "StereoAEGwcNet": StereoAEGwcNetTrainer,
-    "RLGradientAEGwcNet": RLGradientAEGwcNetTrainer,
-
     
+    "AdpAENet": AdpAENetTrainer,
+    "AdaptiveAENet": AdaptiveAENetTrainer,
+    
+
+
+
     "AverageAEPSMNet": AverageAEPSMNetTrainer,
     "GardientAEPSMNet": GardientAEPSMNetTrainer,
-    "NeuralAEPSMNet": NeuralAEPSMNetTrainer,
+    "GardientAEPSMNetFinetune": FinetuneGardientAEPSMNetTrainer,
+    # "AttAEPSMNet": AttAEPSMNetTrainer,
+    "AttAEPSMNet": AttAEPSMNetTrainer,
     "StereoAEPSMNet": StereoAEPSMNetTrainer,
-    "RLGardientAEPSMNet": RLGardientAEPSMNetTrainer,
 
     # Sequence AE variants
     'GwcSequenceNet': GwcNetSequenceTrainer,

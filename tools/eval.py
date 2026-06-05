@@ -19,6 +19,7 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
+
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--dist_mode', action='store_true', default=False, help='torchrun ddp multi gpu')
@@ -68,7 +69,8 @@ def main():
         global_rank = 0
 
     # env
-    torch.cuda.set_device(local_rank)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
     seed = 0 if not args.dist_mode else dist.get_rank()
     common_utils.set_random_seed(seed=seed)
 

@@ -18,8 +18,6 @@ from stereo.utils.lamb import Lamb
 from stereo.evaluation.metric_per_image import epe_metric, d1_metric, threshold_metric
 
 
-
-# torch.autograd.set_detect_anomaly(True)
 class TrainerTemplate:
     def __init__(self, args, cfgs, local_rank, global_rank, logger, tb_writer, model):
         self.args = args
@@ -28,6 +26,7 @@ class TrainerTemplate:
         self.global_rank = global_rank
         self.logger = logger
         self.tb_writer = tb_writer
+        self.device = torch.device('cuda', local_rank) if torch.cuda.is_available() else torch.device('cpu')
 
         self.model = self.build_model(model)
 
@@ -86,7 +85,7 @@ class TrainerTemplate:
         if self.cfgs.OPTIMIZATION.SYNC_BN and self.args.dist_mode:
             model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
             self.logger.info('Convert batch norm to sync batch norm')
-        model = model.to(self.local_rank)
+        model = model.to(self.device)
 
         if self.args.dist_mode:
             model = nn.parallel.DistributedDataParallel(
@@ -100,7 +99,7 @@ class TrainerTemplate:
             if not os.path.isfile(self.cfgs.MODEL.PRETRAINED_MODEL):
                 raise FileNotFoundError
             common_utils.load_params_from_file(
-                model, self.cfgs.MODEL.PRETRAINED_MODEL, device='cuda:%d' % self.local_rank,
+                model, self.cfgs.MODEL.PRETRAINED_MODEL, device=str(self.device),
                 dist_mode=self.args.dist_mode, logger=self.logger, strict=False)
         return model
 
@@ -112,7 +111,8 @@ class TrainerTemplate:
         valid_arg = common_utils.get_valid_args(optimizer_cls, self.cfgs.OPTIMIZATION.OPTIMIZER, ['name'])
         optimizer = optimizer_cls(params=[p for p in self.model.parameters() if p.requires_grad], **valid_arg)
 
-        self.cfgs.OPTIMIZATION.SCHEDULER.TOTAL_STEPS = self.max_iter
+        if self.cfgs.OPTIMIZATION.SCHEDULER.get('TOTAL_STEPS', None) is None:
+            self.cfgs.OPTIMIZATION.SCHEDULER.TOTAL_STEPS = self.max_iter
         scheduler_cls = getattr(torch.optim.lr_scheduler, self.cfgs.OPTIMIZATION.SCHEDULER.NAME)
         valid_arg = common_utils.get_valid_args(scheduler_cls, self.cfgs.OPTIMIZATION.SCHEDULER, ['name', 'on_epoch'])
         scheduler = scheduler_cls(optimizer, **valid_arg)
@@ -122,7 +122,7 @@ class TrainerTemplate:
     def resume_ckpt(self):
         self.logger.info('Resume from ckpt:%d' % self.cfgs.MODEL.CKPT)
         ckpt_path = str(os.path.join(self.args.ckpt_dir, 'checkpoint_epoch_%d.pth' % self.cfgs.MODEL.CKPT))
-        checkpoint = torch.load(ckpt_path, map_location='cuda:%d' % self.local_rank)
+        checkpoint = torch.load(ckpt_path, map_location=str(self.device))
         self.last_epoch = checkpoint['epoch']
         self.scheduler.load_state_dict(checkpoint['scheduler_state'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state'])
@@ -208,7 +208,7 @@ class TrainerTemplate:
             start_timer = time.time()
             data = next(train_loader_iter)
             for k, v in data.items():
-                data[k] = v.to(self.local_rank) if torch.is_tensor(v) else v
+                data[k] = v.to(self.device) if torch.is_tensor(v) else v
             data_timer = time.time()
 
             with torch.cuda.amp.autocast(enabled=self.cfgs.OPTIMIZATION.AMP):
@@ -272,6 +272,7 @@ class TrainerTemplate:
 
         evaluator_cfgs = self.cfgs.EVALUATOR
         local_rank = self.local_rank
+        device = self.device
 
         epoch_metrics = {}
         for k in evaluator_cfgs.METRIC:
@@ -279,7 +280,7 @@ class TrainerTemplate:
 
         for i, data in enumerate(self.eval_loader):
             for k, v in data.items():
-                data[k] = v.to(local_rank) if torch.is_tensor(v) else v
+                data[k] = v.to(device) if torch.is_tensor(v) else v
 
             with torch.cuda.amp.autocast(enabled=self.cfgs.OPTIMIZATION.AMP):
                 infer_start = time.time()
@@ -317,8 +318,8 @@ class TrainerTemplate:
             dist.barrier()
             self.logger.info("Start reduce metrics.")
             for k in epoch_metrics.keys():
-                indexes = torch.tensor(epoch_metrics[k]["indexes"]).to(local_rank)
-                values = torch.tensor(epoch_metrics[k]["values"]).to(local_rank)
+                indexes = torch.tensor(epoch_metrics[k]["indexes"]).to(device)
+                values = torch.tensor(epoch_metrics[k]["values"]).to(device)
                 gathered_indexes = [torch.zeros_like(indexes) for _ in range(dist.get_world_size())]
                 gathered_values = [torch.zeros_like(values) for _ in range(dist.get_world_size())]
                 dist.all_gather(gathered_indexes, indexes)

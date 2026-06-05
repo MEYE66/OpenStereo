@@ -14,16 +14,17 @@ if str(repo_root) not in sys.path:
 try:
     from stereo.modeling.models.ae_util import _cfg_get, ExposureControlMixin
     from stereo.modeling.models.gwcnet.gwcnet import GwcNet as BaseGwcNet
-    from stereo.modeling.models.gwcnet.gwcnet_lidar_sparse import LidarGwcNet
     from stereo.modeling.models.psmnet.psmnet import PSMNet as BasePSMNet
+
+    from stereo.modeling.models.gwcnet.gwcnet_lidar_sparse import LidarGwcNet
     from stereo.modeling.models.gwcnet.gwcnet_sequence import GwcSequenceNet
 
 except ModuleNotFoundError:
     from ..ae_util import _cfg_get, ExposureControlMixin
     from ..gwcnet.gwcnet import GwcNet as BaseGwcNet
-    from ..gwcnet.gwcnet_lidar_sparse import LidarGwcNet
     from ..psmnet.psmnet import PSMNet as BasePSMNet
 
+    from ..gwcnet.gwcnet_lidar_sparse import LidarGwcNet
     from ..gwcnet.gwcnet_sequence import GwcSequenceNet
 
 
@@ -38,17 +39,32 @@ def _grad_score(gray):
     return torch.sqrt(gx * gx + gy * gy + 1e-12).mean(dim=(1, 2, 3))
 
 
+# previous end-to-end gradientAE
+# class GradientExposureController(nn.Module):
+#     def __init__(self, target_grad=0.12, min_exposure=1.0, max_exposure=20.0):
+#         super().__init__()
+#         self.target_grad = float(target_grad)
+#         self.min_exposure = float(min_exposure)
+#         self.max_exposure = float(max_exposure)
+
+#     def forward(self, image):
+#         gray = image.mean(dim=1, keepdim=True)
+#         grad_strength = _grad_score(gray)
+#         exp_val = self.target_grad / (grad_strength + 1e-6)
+#         return torch.clamp(exp_val, self.min_exposure, self.max_exposure)
+
 class GradientExposureController(nn.Module):
     def __init__(self, target_grad=0.12, min_exposure=1.0, max_exposure=20.0):
         super().__init__()
-        self.target_grad = float(target_grad)
+        self.log_target_grad = nn.Parameter(torch.log(torch.tensor(float(target_grad), dtype=torch.float32)))
         self.min_exposure = float(min_exposure)
         self.max_exposure = float(max_exposure)
 
     def forward(self, image):
         gray = image.mean(dim=1, keepdim=True)
         grad_strength = _grad_score(gray)
-        exp_val = self.target_grad / (grad_strength + 1e-6)
+        target_grad = F.softplus(self.log_target_grad) + 1e-6
+        exp_val = target_grad / (grad_strength + 1e-6)
         return torch.clamp(exp_val, self.min_exposure, self.max_exposure)
 
 
@@ -163,21 +179,24 @@ def sequence_test():
         NUM_GROUPS=int(8),
     )
     model = GradientAEGwcSequenceNet(cfgs=cfgs)
-    model.eval()
+    # model.eval()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     radiance_left = torch.rand(1, 3, 256, 512, device=device)
     radiance_right = torch.rand(1, 3, 256, 512, device=device)
 
-    with torch.no_grad():
-        disp_pred = model({
+    # with torch.no_grad():
+        # model.eval()
+    disp_pred = model({
             'left_1': radiance_left,
             'right_1': radiance_right,
             'left_2': radiance_left,
             'right_2': radiance_right
         })
-    print(disp_pred)
+    print(disp_pred.keys())
+    
+    print(model.get_loss(disp_pred, {'disp': torch.rand(1, 256, 512, device=device)}))
 
 
 if __name__ == '__main__':

@@ -1,89 +1,143 @@
-import numpy as np
+import sys
+from pathlib import Path
 import cv2
-
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Optional, Tuple
+
+
+
+def _find_repo_root(start_path: Path) -> Path:
+    for parent in [start_path] + list(start_path.parents):
+        if (parent / 'stereo').is_dir():
+            return parent
+    raise RuntimeError('Could not locate repository root containing the stereo package.')
+
+
+repo_root = _find_repo_root(Path(__file__).resolve())
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
+from stereo.modeling.models.exposure_motion_psf_torch_refactor import apply_exposure_motion_psf
 
 
 def exposure_value_equation(ev_vaules, time_limits, gain_limits):
-    gain = torch.clamp(ev_vaules / time_limits[1], 1., None)
-    expo = ev_vaules / gain
-    gain = torch.clamp(gain, gain_limits[0], gain_limits[1])
+    """Prefer longer exposure and only increase gain when exposure hits the upper bound."""
+    gain_limits_ratio = dB_to_ratio(gain_limits)
+    gain_ratio = torch.clamp(ev_vaules / time_limits[1], min=gain_limits_ratio[0])
+    expo = ev_vaules / gain_ratio
+    gain_ratio = torch.clamp(gain_ratio, gain_limits_ratio[0], gain_limits_ratio[1])
     expo = torch.clamp(expo, time_limits[0], time_limits[1])
+    gain = torch.clamp(ratio_to_dB(gain_ratio), gain_limits[0], gain_limits[1])
     return expo, gain
-
 
 
 class QuantizeSTE(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input, n=8):
+    def forward(ctx, input, nbits=10):
         # LDR image max value
-        max_val = 2**n - 1
-
+        max_val = 2 ** nbits - 1
         # Quantize
-        # x_scaled = input * max_val
-        # x_clamped = torch.clamp(x_scaled, 0, max_val)
-        # x_clamped = torch.round(x_clamped)
         output = torch.clamp(torch.floor(input + 0.5), min=0, max=max_val)
-
-        # Normalized to 0~1
-        # output = output / max_val
-        output = (output - output.min()) / (output.max() - output.min())
+        # x_dequantized = x_quantized / max_val
+        output = output / max_val
         return output
-        # return x_clamped
 
     @staticmethod
     def backward(ctx, grad_output):
         return grad_output, None
 
 
+def dB_to_ratio(dB):
+    return 10 ** (dB / 20.0)
 
-def electron_to_digital(electrons,  well_capacity=4e4, n_bits=8):
-    digital_number = torch.clamp(electrons, 0, well_capacity)  # Clip to the range of 8-bit digital number
-    # digital_number = digital_number / well_capacity * (2**n_bits - 1)  # Scale to the range of digital number
-    return digital_number
+
+def ratio_to_dB(ratio):
+    if torch.is_tensor(ratio):
+        return 20.0 * torch.log10(torch.clamp(ratio, min=1e-8))
+    return 20.0 * np.log10(max(float(ratio), 1e-8))
 
 
 class ImageFormationModel(nn.Module):
-    def __init__(self, nbits=8,):
+    def __init__(self, nbits=10, motion_blur=True, motion_angle_deg=None, motion_blur_params=None):
         super(ImageFormationModel, self).__init__()
         self.nbits = nbits
-
-        # self.gaussian_var = torch.tensor(1.0e-3, requires_grad=True)
-        # self.poisson_scale = torch.tensor(3.4e-4, requires_grad=True)
-        # Keep noise statistics device-aware without treating them as trainable weights.
-        self.register_buffer('gaussian_var', torch.tensor(3e-5, dtype=torch.float32))
+        self.motion_blur = motion_blur
+        self.register_buffer('gaussian_var', torch.tensor(0.8, dtype=torch.float32))
         self.register_buffer('poisson_scale', torch.tensor(3.3e-4, dtype=torch.float32))
+        self.register_buffer('adc_noise_scale', torch.tensor(1/nbits, dtype=torch.float32))
+        self.motion_blur_params = {
+            'velocity_scale': 0.8,
+            'min_length': 1,
+            'max_length': 15,
+            'canvas_size': 31,
+            'line_sigma': 0.55,
+            'edge_softness': 0.75,
+            'eps': 1e-8,
+        }
+        if motion_blur_params is not None:
+            self.motion_blur_params.update(motion_blur_params)
+        self.motion_angle_deg = 10.0 if motion_angle_deg is None else float(motion_angle_deg)
+        self.motion_psf = None
+        self.motion_psf_info = None
+        self.quantization = QuantizeSTE(nbits=nbits)
+
+
+    def _apply_exposure_motion_blur(self, radiance, exposure_time_ms):
+        if not self.motion_blur:
+            return radiance
+
+        angle = exposure_time_ms.new_full(exposure_time_ms.shape, self.motion_angle_deg)
+        blurred_radiance, self.motion_psf, motion_length = apply_exposure_motion_psf(
+            radiance,
+            exposure_time=exposure_time_ms,
+            angle=angle,
+            **self.motion_blur_params,
+        )
+        self.motion_psf_info = {
+            'exposure_time_ms': exposure_time_ms,
+            'angle_deg': angle,
+            'kernel_size': self.motion_psf.shape[-1],
+            'length_px': motion_length,
+        }
+        return blurred_radiance
+
+
     def forward(self, radiance, t_pred, g_pred):
         # add noise based on exposure value
         # radiance = self.radiance_scale(radiance)
+        # exposure_time = t_pred.reshape(-1)
         t_pred = t_pred.view(-1, 1, 1, 1)
-        g_pred = g_pred.view(-1, 1, 1, 1)
+        g_pred = dB_to_ratio(g_pred.view(-1, 1, 1, 1))
 
         gauss_std = torch.sqrt(self.gaussian_var) * t_pred
-        poisson_scale = self.poisson_scale * t_pred
+        poisson_scale = torch.clamp(self.poisson_scale * t_pred, min=1e-8)
 
+        radiance = self._apply_exposure_motion_blur(radiance, t_pred.reshape(-1))
         radiance = radiance * t_pred
-        # radiance = electron_to_digital(radiance, well_capacity=4e4) * g_pred
+
         # Shot noise
         shot_noise = torch.poisson(radiance / poisson_scale) * poisson_scale * g_pred
         # Readout noise
         readout_noise = gauss_std * torch.randn_like(radiance) * g_pred
-        # ADC noise
-        adc_noise = gauss_std * torch.randn_like(radiance)
-
+        # ADC quantization noise: U(-sigma, +sigma), sigma = 1 / nbits
+        # sigma = 1.0 / float(self.nbits)
+        # adc_noise = (torch.rand_like(radiance) * 2.0 - 1.0) * sigma
+        adc_noise = (torch.rand_like(radiance) * 2.0 - 1.0) * self.adc_noise_scale 
         noise_radiance = shot_noise + readout_noise + adc_noise
         noise_radiance = torch.clamp(noise_radiance, 0.0, None)
 
-        noise_radiance = QuantizeSTE.apply(noise_radiance, self.nbits)
+        # print(f"noise radicne range: {noise_radiance.min().item()} to {noise_radiance.max().item()}")
+        noise_radiance = self.quantization.apply(noise_radiance, self.nbits)
+        # noise_radiance = noise_radiance / noise_radiance.max()
         return noise_radiance
 
 
-def radiance_scale(radiance,  capacity=1e2):
+def radiance_scale(radiance,  capacity=12):
+    # radiance = radiance / radiance.max() 
+    radiance = (radiance - radiance.min()) / (radiance.max() - radiance.min() + 1e-8) 
     mean_val = radiance.mean()
-    scale = capacity / mean_val
+    scale = capacity / (mean_val + 1e-8)
     radiance = radiance * scale # scale to capacity
     return radiance
 
@@ -104,11 +158,12 @@ def _cfg_pair(cfgs, key, default):
 class ExposureControlMixin:
     def _init_exposure_control(self, cfgs, default_time_limits=(5.0, 20.0), default_gain_limits=(1.0, 20.0)):
         time_limits = _cfg_pair(cfgs, 'TIME_LIMITS', default_time_limits)
+        # gain limits and init gain are interpreted in dB.
         gain_limits = _cfg_pair(cfgs, 'GAIN_LIMITS', default_gain_limits)
         init_exposure = float(_cfg_get(cfgs, 'INIT_EXPOSURE', sum(time_limits) / 2.0))
         init_gain = float(_cfg_get(cfgs, 'INIT_GAIN', sum(gain_limits) / 2.0))
 
-        self.image_formation_model = ImageFormationModel(nbits=8)
+        self.image_formation_model = ImageFormationModel(nbits=10)
         self.exposure_controller = self._build_exposure_controller(
             cfgs=cfgs,
             time_limits=time_limits,
@@ -148,70 +203,61 @@ class ExposureControlMixin:
         raise NotImplementedError('Subclasses must implement _build_exposure_controller.')
 
 
-
-
-def photons_collection(radiance, well_capacity=(2**32 - 1)):
-    # Convert radiance to electrons (assuming linear response and a certain quantum efficiency)
-    electrion = np.clip(radiance, 0, well_capacity)
-    return electrion
-
-
 def to_image(radiance):
     radiance = (radiance - radiance.min()) / (radiance.max() - radiance.min()) * 255.0
     return radiance.astype(np.uint8)
 
 
+def apply_gtm(img, eps=1e-6, param=0.3):
+    img = (img - np.min(img)) / (np.max(img) - np.min(img))
+    Lw_ave = np.exp(np.mean(np.log(eps + img)))
+    Lm = (param / Lw_ave) * img
+    Lm_max = np.max(Lm)
+    out = (Lm * (1 + (Lm / (Lm_max ** 2)))) / (1 + Lm)
+    out =np.clip(out, 0.0, 1.0)
+    return out
+
 if __name__ == "__main__":
     # simulator
-    image_formation = ImageFormationModel(nbits=8)
-
+    nbits = 10
+    image_formation = ImageFormationModel(nbits=nbits, motion_blur=False)
     # Example usage
-    dataset_root = "/home/lgz/dataset/ADEC/carla/dataset/Experiment1/"
-    left_path = dataset_root + "hdr_left/0.hdr"
-    right_path = dataset_root + "hdr_right/0.hdr"
+    dataset_root = "/home/lgz/dataset/ADEC/carla_600x800/train/Experiment10/"
+    left_path = dataset_root + "hdr_left/12.hdr"
+    right_path = dataset_root + "hdr_right/12.hdr"
     print(left_path, right_path)
 
     left_hdr = cv2.imread(left_path, cv2.IMREAD_UNCHANGED) 
     right_hdr = cv2.imread(right_path, cv2.IMREAD_UNCHANGED) 
-    print(f"input radiance: {left_hdr.min()} to {left_hdr.max()}, {right_hdr.min()} to {right_hdr.max()}")
-    # left_hdr = photons_collection(left_hdr, well_capacity=(2**16 - 1))
-    # right_hdr = photons_collection(right_hdr, well_capacity=(2**16 - 1))
 
-    # left_hdr = to_image(left_hdr)
-    # right_hdr = to_image(right_hdr)
-    # cv2.imwrite("left_hdr.png", left_hdr)
-    # cv2.imwrite("right_hdr.png", right_hdr) 
-    # exit(234) 
-    left_hdr = (left_hdr - left_hdr.min()) / (left_hdr.max() - left_hdr.min()) 
-    right_hdr = (right_hdr - right_hdr.min()) / (right_hdr.max() - right_hdr.min())
-
-
-    left_hdr = radiance_scale(left_hdr, capacity=1)
-    right_hdr = radiance_scale(right_hdr, capacity=1)
-
-    
-    # print(f"radiance 90% percentile: {np.percentile(left_hdr, 90)}, {np.percentile(right_hdr, 90)}")
-    # exit(0)
+    # left_hdr = (left_hdr - left_hdr.min()) / (left_hdr.max() - left_hdr.min()) 
+    # right_hdr = (right_hdr - right_hdr.min()) / (right_hdr.max() - right_hdr.min())
+    left_hdr = radiance_scale(left_hdr, capacity=12)
+    right_hdr = radiance_scale(right_hdr, capacity=12)
 
     # Convert to PyTorch tensors
     left_tensor = torch.from_numpy(left_hdr).permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
     right_tensor = torch.from_numpy(right_hdr).permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
 
-    
+    print(f"{left_tensor.min()}, {left_tensor.max()}")
+    print(f"{right_tensor.min()}, {right_tensor.max()}")
+    # print(f"range after ITMO: {left_hdr.min().item()} to {left_hdr.max().item()}, {right_hdr.min().item()} to {right_hdr.max().item()}")
+
     # Example exposure values
-    t_pred = torch.tensor([10.0])  # exposure multiplier
-    g_pred = torch.tensor([5.0])  # gain multiplier 
+    left_t, right_t = torch.tensor([10.0]), torch.tensor([2.0])
+    left_g, right_g = torch.tensor([1.0]), torch.tensor([20.0])
+
     # Simulate noisy, quantized images
-    left_noisy = image_formation(left_tensor, t_pred, g_pred)
-    right_noisy = image_formation(right_tensor, t_pred, g_pred)
-    print("Left noisy image :", left_noisy.shape, left_noisy.min().item(), left_noisy.max().item())
-    print("Right noisy image :", right_noisy.shape, right_noisy.min().item(), right_noisy.max().item())
+    left_noisy = image_formation(left_tensor, left_t, left_g)
+    right_noisy = image_formation(right_tensor, right_t, right_g)
+
+    print(f"noisy image range: {left_noisy.min().item()} to {left_noisy.max().item()}, {right_noisy.min().item()} to {right_noisy.max().item()}")
+
+    left_ldr = left_noisy.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
+    right_ldr = right_noisy.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
+
+    left_ldr = apply_gtm(left_ldr)
     
 
-    # left_ldr = left_noisy.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
-    # right_ldr = right_noisy.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
-    # left_ldr = (left_ldr - left_ldr.min()) / (left_ldr.max() - left_ldr.min() )* 255.0
-    # right_ldr = (right_ldr - right_ldr.min()) / (right_ldr.max() - right_ldr.min()) * 255.0
-    # print(f"output LDR: {left_ldr.min()} to {left_ldr.max()}, {right_ldr.min()} to {right_ldr.max()}")
-    # cv2.imwrite("left_ldr.png", left_ldr.astype(np.uint8))
-    # cv2.imwrite("right_ldr.png", right_ldr.astype(np.uint8)) 
+    cv2.imwrite(f"./{nbits}_left_ldr_sece.png", to_image(left_ldr))
+    cv2.imwrite(f"./{nbits}_right_ldr_sece.png", to_image(right_ldr)) 

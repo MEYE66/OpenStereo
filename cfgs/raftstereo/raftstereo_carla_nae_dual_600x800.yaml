@@ -1,0 +1,96 @@
+DATA_CONFIG:
+    DATA_INFOS:
+        -   DATASET: CarlaStereoDualDataset
+            DATA_SPLIT: {
+                TRAINING: /home/lgz/workspace/OpenStereo/dataset_split/carla_600x800/train.txt,
+                EVALUATING: /home/lgz/workspace/OpenStereo/dataset_split/carla_600x800/val.txt,
+                TESTING: /home/lgz/workspace/OpenStereo/dataset_split/carla_600x800/val.txt
+            }
+            RETURN_RIGHT_DISP: false
+            MAX_DISP: 192
+            RESCALE: true
+            FRAME_STEP: 1
+
+    DATA_TRANSFORM:
+        TRAINING:
+            - { NAME: RandomCrop, SIZE: [ 512, 512 ], Y_JITTER: false }
+            - { NAME: TransposeImage }
+            - { NAME: ToTensor }
+        EVALUATING:
+            - { NAME: RightTopPad, SIZE: [ 608, 800 ] }
+            - { NAME: TransposeImage }
+            - { NAME: ToTensor }
+
+MODEL:
+    # NAME: NeuralAERAFTStereoDualFinetune
+    NAME: NeuralAERAFTStereoDual
+
+    MAX_DISP: &max_disp 192
+    CORR_IMPLEMENTATION: reg
+    CORR_LEVELS: 4
+    CORR_RADIUS: 4
+    CONTEXT_NORM: batch
+    HIDDEN_DIMS: [ 128, 128, 128 ]
+    MIXED_PRECISION: false
+    N_DOWNSAMPLE: 2
+    N_GRU_LAYERS: 3
+    SHARED_BACKBONE: false
+    SLOW_FAST_GRU: false
+    TRAIN_ITERS: 22
+    EVAL_ITERS: 32
+    LOSS_GAMMA: 0.9
+    AE_ITERS: 3
+    AE_MU: 0.8
+    TIME_LIMITS: [ 1.0, 20.0 ]
+    GAIN_LIMITS: [ 1.0, 20.0 ]
+    INIT_EXPOSURE: 12.5
+    INIT_GAIN: 7.5
+    FIND_UNUSED_PARAMETERS: false
+    CKPT: -1
+    # PRETRAINED_MODEL: '/home/lgz/workspace/OpenStereo/output/CarlaStereoDataset/RAFTStereo/raftstereo_carla/default/ckpt/checkpoint_epoch_19.pth'
+    PRETRAINED_MODEL: ''
+
+
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 4
+    FREEZE_BN: false
+    SYNC_BN: true
+    AMP: false
+    NUM_EPOCHS: 20
+
+    OPTIMIZER:
+        NAME: AdamW
+        LR: &lr 0.001
+        WEIGHT_DECAY: 1.0e-05
+        EPS: 1.0e-08
+
+    SCHEDULER:
+        NAME: OneCycleLR
+        ON_EPOCH: False
+        MAX_LR: *lr
+        PCT_START: 0.01
+        CYCLE_MOMENTUM: False
+        ANNEAL_STRATEGY: linear
+
+    CLIP_GRAD:
+        TYPE: value
+        CLIP_VALUE: 1.0
+
+EVALUATOR:
+    BATCH_SIZE_PER_GPU: 4
+    MAX_DISP: *max_disp
+    METRIC:
+        - d1_all
+        - epe
+        - thres_1
+        - thres_2
+        - thres_3
+
+TRAINER:
+    EVAL_INTERVAL: 1
+    CKPT_SAVE_INTERVAL: 1
+    MAX_CKPT_SAVE_NUM: 30
+    LOGGER_ITER_INTERVAL: 100
+    TRAIN_VISUALIZATION: False
+    EVAL_VISUALIZATION: False

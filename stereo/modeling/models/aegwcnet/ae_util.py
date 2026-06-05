@@ -9,7 +9,7 @@ from typing import Optional, Tuple
 
 class QuantizeSTE(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input, n=12):
+    def forward(ctx, input, n=10):
         # LDR image max value
         max_val = 2**n - 1
         # Quantize
@@ -21,7 +21,6 @@ class QuantizeSTE(torch.autograd.Function):
         # Normalized to 0~1
         output = output / max_val
         return output
-        # return x_clamped
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -36,14 +35,14 @@ def electron_to_digital(electrons,  well_capacity=4e4, n_bits=12):
 
 
 class ImageFormationModel(nn.Module):
-    def __init__(self, nbits=12):
+    def __init__(self, nbits=10):
         super(ImageFormationModel, self).__init__()
         self.nbits = nbits
 
         # self.gaussian_var = torch.tensor(1.0e-3, requires_grad=True)
         # self.poisson_scale = torch.tensor(3.4e-4, requires_grad=True)
-        self.gaussian_var = torch.tensor(5., requires_grad=True)
-        self.poisson_scale = torch.tensor(1., requires_grad=True)
+        self.register_buffer("gaussian_var", torch.tensor(5.))
+        self.register_buffer("poisson_scale", torch.tensor(1.))
 
 
     def forward(self, radiance, t_pred, g_pred):
@@ -57,7 +56,6 @@ class ImageFormationModel(nn.Module):
         poisson_scale = self.poisson_scale * t_pred
 
         radiance = radiance * t_pred
-        # radiance = electron_to_digital(radiance, well_capacity=4e4) * g_pred
         # Shot noise
         shot_noise = torch.poisson(radiance / poisson_scale) * poisson_scale * g_pred
         # Readout noise

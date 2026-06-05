@@ -28,9 +28,11 @@ from .realfill_dataset import RealfillDataset
 
 
 from .carla_stereo_dataset import CarlaStereoDataset
+from .carla_stereo_dual_dataset import CarlaStereoDualDataset
 from .carla_sequence_dataset import CarlaSequenceDataset
 
 from .lidar_stereo_dataset import LidarStereoDataset
+from .actor_critic_replay_buffer import ActorCriticReplayBuffer, CarlaStereoExperienceReplayBuffer, ExposureStateConfig
 
 __all__ = {
     'RealfillDataset': RealfillDataset,
@@ -54,7 +56,10 @@ __all__ = {
     'DynamicReplicaDataset': DynamicReplicaDataset,
     'CarlaDataset': CarlaDataset,
     'CarlaStereoDataset': CarlaStereoDataset,
+    'CarlaStereoDualDataset': CarlaStereoDualDataset,
     'CarlaSequenceDataset': CarlaSequenceDataset,
+    'SACBuffer': ActorCriticReplayBuffer,
+    'CarlaStereoBuffer': CarlaStereoExperienceReplayBuffer,
     'LidarStereoDataset': LidarStereoDataset,
     
 }

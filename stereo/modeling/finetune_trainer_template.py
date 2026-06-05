@@ -7,7 +7,7 @@ from stereo.utils import common_utils
 from stereo.utils.lamb import Lamb
 
 
-class ExposureControllerFinetuneTrainerTemplate(TrainerTemplate):
+class FinetuneTrainerTemplate(TrainerTemplate):
     def _get_base_model(self):
         return self.model.module if self.args.dist_mode else self.model
 
@@ -52,7 +52,6 @@ class ExposureControllerFinetuneTrainerTemplate(TrainerTemplate):
         scheduler_cls = getattr(torch.optim.lr_scheduler, self.cfgs.OPTIMIZATION.SCHEDULER.NAME)
         valid_arg = common_utils.get_valid_args(scheduler_cls, self.cfgs.OPTIMIZATION.SCHEDULER, ['name', 'on_epoch'])
         scheduler = scheduler_cls(optimizer, **valid_arg)
-
         return optimizer, scheduler
 
 

@@ -1,0 +1,84 @@
+DATA_CONFIG:
+    DATA_INFOS:
+        -   DATASET: CarlaStereoExposureDataset
+            DATA_SPLIT: {
+                TRAINING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/train.txt,
+                EVALUATING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/val.txt,
+                TESTING: /home/lgz/workspace/OpenStereo/dataset_split/carla_stereo/test.txt
+            }
+            RETURN_RIGHT_DISP: false
+            MAX_DISP: 192
+            ENABLE_HDR: false
+            MINMAX_NORM: false
+            ADD_NOISE: false
+            ENABLE_STEREO_BRIGHTNESS_AUG: true
+            STEREO_BRIGHTNESS_AUG_PROB: 0.8
+            BRIGHTNESS_GAIN_RANGE: [0.75, 1.35]
+            BRIGHTNESS_GAMMA_RANGE: [0.85, 1.15]
+            BRIGHTNESS_TARGET_MEAN_RANGE: [0.20, 0.80]
+            BRIGHTNESS_CLIP_RANGE: [0.0, 1.0]
+            BRIGHTNESS_MIN_STEREO_DIFF: 0.10
+            BRIGHTNESS_MAX_STEREO_DIFF: 0.35
+            PAIR_RADIANCE_SCALE: true
+            RADIANCE_CAPACITY: 1.0
+
+    DATA_TRANSFORM:
+        TRAINING:
+            - { NAME: RandomCrop, SIZE: [ 512, 512 ], Y_JITTER: false }
+            - { NAME: TransposeImage }
+            - { NAME: ToTensor }
+        EVALUATING:
+            - { NAME: RightTopPad, SIZE: [ 608, 800 ] }
+            - { NAME: TransposeImage }
+            - { NAME: ToTensor }
+
+MODEL:
+    NAME: GwcNet
+    MAX_DISP: &max_disp 192
+    USE_CONCAT_VOLUME: true
+    CONCAT_CHANNELS: 12
+    DOWNSAMPLE: 4
+    NUM_GROUPS: 40
+    FIND_UNUSED_PARAMETERS: false
+    CKPT: -1
+    PRETRAINED_MODEL: ''
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 4
+    FREEZE_BN: false
+    SYNC_BN: true
+    AMP: false
+    NUM_EPOCHS: 20
+
+    OPTIMIZER:
+        NAME: AdamW
+        LR: &lr 0.0015
+
+    SCHEDULER:
+        NAME: OneCycleLR
+        MAX_LR: *lr
+        PCT_START: 0.01
+        ON_EPOCH: False
+
+    CLIP_GRAD:
+        TYPE: norm
+        MAX_NORM: 35
+        NORM_TYPE: 2
+
+EVALUATOR:
+    BATCH_SIZE_PER_GPU: 4
+    MAX_DISP: *max_disp
+    METRIC:
+        - d1_all
+        - epe
+        - thres_1
+        - thres_2
+        - thres_3
+
+TRAINER:
+    EVAL_INTERVAL: 1
+    CKPT_SAVE_INTERVAL: 1
+    MAX_CKPT_SAVE_NUM: 30
+    LOGGER_ITER_INTERVAL: 100
+    TRAIN_VISUALIZATION: False
+    EVAL_VISUALIZATION: True

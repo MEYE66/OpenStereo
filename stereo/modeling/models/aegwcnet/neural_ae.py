@@ -2,15 +2,12 @@ import torch
 import torch.nn as nn
 
 from stereo.modeling.models.aegwcnet.ae_util import ImageFormationModel
+from stereo.modeling.models.ae_util import dB_to_ratio, exposure_value_equation as shared_exposure_value_equation
 from stereo.modeling.models.gwcnet.gwcnet import GwcNet as BaseGwcNet
 
 
 def exposure_value_equation(ev_vaules, time_limits, gain_limits):
-    gain = torch.clamp(ev_vaules / time_limits[1], 1., None)
-    expo = ev_vaules / gain
-    gain = torch.clamp(gain, gain_limits[0], gain_limits[1])
-    expo = torch.clamp(expo, time_limits[0], time_limits[1])
-    return expo, gain
+    return shared_exposure_value_equation(ev_vaules, time_limits, gain_limits)
 
 
 def _to_unit_range(img):
@@ -60,14 +57,16 @@ class NeuralAEStereoNet(nn.Module):
         self.init_gain = torch.tensor((gain_limits[0] + gain_limits[1]) / 2, requires_grad=True).cuda()
 
     def forward(self, radiance_left, radiance_right):
-        img_left = self.image_formation_model(radiance_left, self.init_exp, self.init_gain)
-        img_right = self.image_formation_model(radiance_right, self.init_exp, self.init_gain)
+        init_gain_ratio = dB_to_ratio(self.init_gain)
+        img_left = self.image_formation_model(radiance_left, self.init_exp, init_gain_ratio)
+        img_right = self.image_formation_model(radiance_right, self.init_exp, init_gain_ratio)
 
         expo_values = self.exposure_controller((img_left + img_right) / 2)
         expo_update, gain_update = exposure_value_equation(expo_values, self.time_limits, self.gain_limits)
+        gain_update_ratio = dB_to_ratio(gain_update)
 
-        img_left_updated = self.image_formation_model(radiance_left, expo_update, gain_update)
-        img_right_updated = self.image_formation_model(radiance_right, expo_update, gain_update)
+        img_left_updated = self.image_formation_model(radiance_left, expo_update, gain_update_ratio)
+        img_right_updated = self.image_formation_model(radiance_right, expo_update, gain_update_ratio)
 
         disp_pred = self.disp_model(img_left_updated, img_right_updated)
         return disp_pred

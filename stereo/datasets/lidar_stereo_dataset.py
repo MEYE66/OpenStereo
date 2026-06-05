@@ -263,9 +263,11 @@ if __name__ == '__main__':
     # print('Occ mask shape:', sample['occ_mask'].shape, sample['occ_mask'].dtype)
     print('Valid mask shape:', sample['valid'].shape, sample['valid'].dtype, sample['valid'].sum())
 
-
-
-    cv2.imwrite('sample_left.png', cv2.cvtColor(sample['left'], cv2.COLOR_RGB2BGR))
+    left = np.clip(sample['left']*255, 0, 255).astype(np.uint8)
+    right = np.clip(sample['right']*255, 0, 255).astype(np.uint8)
+    flag = cv2.imwrite('./sample_left.png', cv2.cvtColor(left, cv2.COLOR_RGB2BGR))
+    cv2.imwrite('./sample_right.png', cv2.cvtColor(right, cv2.COLOR_RGB2BGR))
+    print(flag)
     # points = _load_points(os.path.join(args.data_root, dataset.data_list[200][2])) * dataset.point_scale
     # points = _transform_points_inverse(points, dataset.transform_mtx)
     # points = _project_points_on_camera(

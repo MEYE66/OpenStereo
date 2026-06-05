@@ -22,8 +22,11 @@ DATA_PATH_DICT = {
     'DynamicReplicaDataset': '/file_system/vepfs/public_data/stereo/dynamic_stereo',
     'MonoDataset': '/file_system/vepfs/public_data/depthAnythingData',
     'RealfillDataset': '/file_system/vepfs/public_data/depthAnythingData',
-    'CarlaStereoDataset': '/home/lgz/dataset/ADEC/aaa/', # pid
-    'CarlaSequenceDataset': '/home/lgz/dataset/ADEC/aaa/',
+    'CarlaStereoDataset': '/home/lgz/dataset/ADEC/', # carla
+    'CarlaStereoDualDataset': '/home/lgz/dataset/ADEC/', # carla
+    'CarlaStereoDualDataset2': '/home/lgz/dataset/ADEC/', # carla
+
+    'CarlaSequenceDataset': '/home/lgz/dataset/ADEC/',
     'LidarStereoDataset': '/home/lgz/dataset/ADEC/real/',
 
 }

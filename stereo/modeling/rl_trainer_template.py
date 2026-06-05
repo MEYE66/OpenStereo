@@ -24,7 +24,6 @@ class A2CTrainerTemplate(TrainerTemplate):
         self.rollout_steps = int(self._cfg_get(self.rl_cfg, 'ROLLOUT_STEPS', 3))
         self.gamma = float(self._cfg_get(self.rl_cfg, 'GAMMA', 0.99))
         self.gae_lambda = float(self._cfg_get(self.rl_cfg, 'GAE_LAMBDA', 0.95))
-        self.action_penalty_weight = float(self._cfg_get(self.rl_cfg, 'ACTION_PENALTY_WEIGHT', 0.0))
         self.entropy_weight = float(self._cfg_get(self.rl_cfg, 'ENTROPY_WEIGHT', 0.001))
         self.actor_loss_weight = float(self._cfg_get(self.rl_cfg, 'ACTOR_LOSS_WEIGHT', 1.0))
         self.critic_loss_weight = float(self._cfg_get(self.rl_cfg, 'CRITIC_LOSS_WEIGHT', 0.5))
@@ -34,6 +33,13 @@ class A2CTrainerTemplate(TrainerTemplate):
         self.train_stereo_from_start = bool(self._cfg_get(self.rl_cfg, 'TRAIN_STEREO', False))
         self.unfreeze_epoch = int(self._cfg_get(self.rl_cfg, 'UNFREEZE_EPOCH', -1))
         self.deterministic_eval = bool(self._cfg_get(self.rl_cfg, 'DETERMINISTIC_EVAL', True))
+        self.debug_nan = bool(
+            self._cfg_get(
+                self.rl_cfg,
+                'DEBUG_NAN',
+                self._cfg_get(getattr(cfgs, 'MODEL', None), 'DEBUG_NAN', True),
+            )
+        )
         
         
 
@@ -105,9 +111,8 @@ class A2CTrainerTemplate(TrainerTemplate):
     def _schedulers_on_epoch(self):
         actor_on_epoch = bool(self._cfg_get(self.actor_scheduler_cfg, 'ON_EPOCH', False))
         critic_on_epoch = bool(self._cfg_get(self.critic_scheduler_cfg, 'ON_EPOCH', False))
-        stereo_on_epoch = bool(self._cfg_get(self.stereo_scheduler_cfg, 'ON_EPOCH', False))
-        if actor_on_epoch != critic_on_epoch or actor_on_epoch != stereo_on_epoch:
-            raise ValueError('ACTOR/CRITIC/STEREO scheduler ON_EPOCH must be consistent.')
+        if actor_on_epoch != critic_on_epoch:
+            raise ValueError('ACTOR/CRITIC scheduler ON_EPOCH must be consistent.')
         return actor_on_epoch
 
     def _build_component_warmup(self, optimizer, scheduler_cfg):
@@ -123,8 +128,6 @@ class A2CTrainerTemplate(TrainerTemplate):
             raise AttributeError('A2CTrainerTemplate requires model.get_actor_parameters().')
         if not hasattr(model_ref, 'get_critic_parameters'):
             raise AttributeError('A2CTrainerTemplate requires model.get_critic_parameters().')
-        if not hasattr(model_ref, 'get_stereo_parameters'):
-            raise AttributeError('A2CTrainerTemplate requires model.get_stereo_parameters().')
 
         model_ref.set_stereo_requires_grad(False)
 
@@ -132,12 +135,10 @@ class A2CTrainerTemplate(TrainerTemplate):
         actor_scheduler_cfg = self._get_component_cfg('ACTOR_SCHEDULER')
         critic_optimizer_cfg = self._get_component_cfg('CRITIC_OPTIMIZER')
         critic_scheduler_cfg = self._get_component_cfg('CRITIC_SCHEDULER')
-        stereo_optimizer_cfg = self._get_component_cfg('STEREO_OPTIMIZER')
-        stereo_scheduler_cfg = self._get_component_cfg('STEREO_SCHEDULER')
 
         self.actor_scheduler_cfg = copy.deepcopy(actor_scheduler_cfg)
         self.critic_scheduler_cfg = copy.deepcopy(critic_scheduler_cfg)
-        self.stereo_scheduler_cfg = copy.deepcopy(stereo_scheduler_cfg)
+        self.stereo_scheduler_cfg = None
 
         self.actor_optimizer = self._build_optimizer(model_ref.get_actor_parameters(), actor_optimizer_cfg)
         self.actor_scheduler = self._build_scheduler(self.actor_optimizer, actor_scheduler_cfg)
@@ -145,14 +146,12 @@ class A2CTrainerTemplate(TrainerTemplate):
         self.critic_optimizer = self._build_optimizer(model_ref.get_critic_parameters(), critic_optimizer_cfg)
         self.critic_scheduler = self._build_scheduler(self.critic_optimizer, critic_scheduler_cfg)
 
-        stereo_optimizer = self._build_optimizer(model_ref.get_stereo_parameters(), stereo_optimizer_cfg)
-        stereo_scheduler = self._build_scheduler(stereo_optimizer, stereo_scheduler_cfg)
-        return stereo_optimizer, stereo_scheduler
+        return self.actor_optimizer, self.actor_scheduler
 
     def build_warmup(self):
         self.actor_warmup_scheduler = self._build_component_warmup(self.actor_optimizer, self.actor_scheduler_cfg)
         self.critic_warmup_scheduler = self._build_component_warmup(self.critic_optimizer, self.critic_scheduler_cfg)
-        return self._build_component_warmup(self.optimizer, self.stereo_scheduler_cfg)
+        return self.actor_warmup_scheduler
 
     def resume_ckpt(self):
         self.logger.info('Resume from ckpt:%d' % self.cfgs.MODEL.CKPT)
@@ -191,7 +190,7 @@ class A2CTrainerTemplate(TrainerTemplate):
 
     def _prepare_train_modes(self, ):
         model_ref = self._get_model_ref()
-        self.model.eval()
+        self.model.train()
         model_ref.actor.train()
         model_ref.critic.train()
         model_ref.env.train()
@@ -226,6 +225,64 @@ class A2CTrainerTemplate(TrainerTemplate):
         return rewards, values, log_probs, entropies
 
     @staticmethod
+    def _tensor_stats_message(tensor):
+        detached = tensor.detach()
+        finite_mask = torch.isfinite(detached)
+        finite_count = int(finite_mask.sum().item())
+        total_count = detached.numel()
+        message = 'shape={} dtype={} device={} finite={}/{}'.format(
+            tuple(detached.shape),
+            detached.dtype,
+            detached.device,
+            finite_count,
+            total_count,
+        )
+        if finite_count > 0:
+            finite_values = detached[finite_mask].to(dtype=torch.float32)
+            message += ' min={:.6g} max={:.6g} mean={:.6g} std={:.6g}'.format(
+                finite_values.min().item(),
+                finite_values.max().item(),
+                finite_values.mean().item(),
+                finite_values.std(unbiased=False).item(),
+            )
+        return message
+
+    def _require_finite(self, name, tensor):
+        if not self.debug_nan or not torch.is_tensor(tensor):
+            return
+        if not torch.isfinite(tensor).all():
+            raise FloatingPointError(
+                '{} contains non-finite values: {}'.format(
+                    name,
+                    self._tensor_stats_message(tensor),
+                )
+            )
+
+    def _require_module_params_finite(self, module, module_name):
+        if not self.debug_nan:
+            return
+        for name, param in module.named_parameters():
+            self._require_finite(f'{module_name}.param.{name}', param)
+
+    def _require_module_grads_finite(self, module, module_name):
+        if not self.debug_nan:
+            return
+        for name, param in module.named_parameters():
+            if param.grad is not None:
+                self._require_finite(f'{module_name}.grad.{name}', param.grad)
+
+    def _require_optimizer_state_finite(self, optimizer, optimizer_name):
+        if not self.debug_nan:
+            return
+        for param_idx, state in enumerate(optimizer.state.values()):
+            for state_name, value in state.items():
+                if torch.is_tensor(value):
+                    self._require_finite(
+                        f'{optimizer_name}.state[{param_idx}].{state_name}',
+                        value,
+                    )
+
+    @staticmethod
     def _transition_mean(transitions, key):
         if len(transitions) == 0 or key not in transitions[0]:
             return None
@@ -233,6 +290,24 @@ class A2CTrainerTemplate(TrainerTemplate):
         if any(value is None for value in values):
             return None
         return torch.stack(values, dim=0).mean().item()
+
+    @staticmethod
+    def _transition_stats(transitions, key):
+        if len(transitions) == 0 or key not in transitions[0]:
+            return None
+        values = [transition.get(key, None) for transition in transitions]
+        if any(value is None for value in values):
+            return None
+        stacked = torch.stack(values, dim=0)
+        abs_stacked = stacked.abs()
+        return {
+            'mean': stacked.mean().item(),
+            'std': stacked.std(unbiased=False).item(),
+            'min': stacked.min().item(),
+            'max': stacked.max().item(),
+            'abs_mean': abs_stacked.mean().item(),
+            'abs_max': abs_stacked.max().item(),
+        }
 
     def _compute_gae(self, rewards, values, bootstrap_value):
         advantages = torch.zeros_like(values)
@@ -265,6 +340,9 @@ class A2CTrainerTemplate(TrainerTemplate):
 
             actor_lr = self.actor_optimizer.param_groups[0]['lr']
             critic_lr = self.critic_optimizer.param_groups[0]['lr']
+            if self.debug_nan:
+                self._require_module_params_finite(model_ref.actor, f'iter{total_iter}.actor.before')
+                self._require_module_params_finite(model_ref.critic, f'iter{total_iter}.critic.before')
 
             start_timer = time.time()
             data = next(train_loader_iter)
@@ -275,12 +353,16 @@ class A2CTrainerTemplate(TrainerTemplate):
                 rollout = model_ref.rollout_episode(
                     batch=data,
                     steps=self.rollout_steps,
-                    action_penalty_weight=self.action_penalty_weight,
                 )
                 transitions = rollout['transitions']
                 rewards, values, log_probs, entropies = self._collect_transition_tensors(transitions)
                 bootstrap_value = rollout['bootstrap_value']
                 raw_rewards = rewards
+                self._require_finite(f'iter{total_iter}.rewards_raw', raw_rewards)
+                self._require_finite(f'iter{total_iter}.values', values)
+                self._require_finite(f'iter{total_iter}.log_probs', log_probs)
+                self._require_finite(f'iter{total_iter}.entropies', entropies)
+                self._require_finite(f'iter{total_iter}.bootstrap_value', bootstrap_value)
                 
                 # Standardize rewards to stabilize value function training
                 if self.normalize_rewards:
@@ -292,15 +374,22 @@ class A2CTrainerTemplate(TrainerTemplate):
                 
                 ### TODO:  change gae function
                 returns, advantages = self._compute_gae(rewards, values, bootstrap_value)
+                self._require_finite(f'iter{total_iter}.rewards_used', rewards)
+                self._require_finite(f'iter{total_iter}.returns', returns)
+                self._require_finite(f'iter{total_iter}.advantages', advantages)
 
                 # Standardize advantages to stabilize policy gradient
                 adv_mean = advantages.mean()
                 adv_std = advantages.std(unbiased=False).clamp_min(self.reward_norm_eps)
                 normalized_advantages = (advantages - adv_mean) / adv_std
+                self._require_finite(f'iter{total_iter}.normalized_advantages', normalized_advantages)
 
                 actor_loss = -(log_probs * normalized_advantages.detach()).mean() - self.entropy_weight * entropies.mean()
                 critic_loss = torch.mean((values - returns.detach()) ** 2)
                 total_obj = self.actor_loss_weight * actor_loss + self.critic_loss_weight * critic_loss
+                self._require_finite(f'iter{total_iter}.actor_loss', actor_loss)
+                self._require_finite(f'iter{total_iter}.critic_loss', critic_loss)
+                self._require_finite(f'iter{total_iter}.total_obj', total_obj)
 
                 tb_info = {}
                 infer_timer = time.time()
@@ -308,13 +397,24 @@ class A2CTrainerTemplate(TrainerTemplate):
             self.scaler.scale(total_obj).backward()
             self.scaler.unscale_(self.actor_optimizer)
             self.scaler.unscale_(self.critic_optimizer)
+            if self.debug_nan:
+                self._require_module_grads_finite(model_ref.actor, f'iter{total_iter}.actor.before_clip')
+                self._require_module_grads_finite(model_ref.critic, f'iter{total_iter}.critic.before_clip')
 
             if self.clip_grad is not None:
                 self.clip_grad(self.model)
+            if self.debug_nan:
+                self._require_module_grads_finite(model_ref.actor, f'iter{total_iter}.actor.after_clip')
+                self._require_module_grads_finite(model_ref.critic, f'iter{total_iter}.critic.after_clip')
 
             self.scaler.step(self.actor_optimizer)
             self.scaler.step(self.critic_optimizer)
             self.scaler.update()
+            if self.debug_nan:
+                self._require_module_params_finite(model_ref.actor, f'iter{total_iter}.actor.after_step')
+                self._require_module_params_finite(model_ref.critic, f'iter{total_iter}.critic.after_step')
+                self._require_optimizer_state_finite(self.actor_optimizer, f'iter{total_iter}.actor_optimizer')
+                self._require_optimizer_state_finite(self.critic_optimizer, f'iter{total_iter}.critic_optimizer')
 
             if not self._schedulers_on_epoch():
                 with self.actor_warmup_scheduler.dampening():
@@ -324,48 +424,64 @@ class A2CTrainerTemplate(TrainerTemplate):
 
             total_loss += total_obj.item()
 
-            seed_epe_tensor = transitions[0]['epe_before']
-            final_epe_tensor = transitions[-1]['epe_after']
-            seed_epe = seed_epe_tensor.mean().item()
-            final_epe = final_epe_tensor.mean().item()
-            worsened_ratio = (final_epe_tensor > seed_epe_tensor).to(torch.float32).mean().item()
+            seed_loss_tensor = transitions[0]['stereo_loss_before']
+            final_loss_tensor = transitions[-1]['stereo_loss_after']
+            seed_loss = seed_loss_tensor.mean().item()
+            final_loss = final_loss_tensor.mean().item()
+            delta_loss = seed_loss - final_loss
+            worsened_ratio = (final_loss_tensor > seed_loss_tensor).to(torch.float32).mean().item()
 
             reward_raw_mean = raw_rewards.mean().item()
             reward_raw_std = raw_rewards.std(unbiased=False).item()
             reward_used_mean = rewards.mean().item()
             reward_used_std = rewards.std(unbiased=False).item()
-            action_mean = torch.stack(
+            exposure_abs_mean = torch.stack(
                 [transition['action'].detach().abs().mean(dim=1) for transition in transitions],
                 dim=0,
             ).mean().item()
+            action_mean_mean = self._transition_mean(transitions, 'action_mean_mean')
+            action_mean_std = self._transition_mean(transitions, 'action_mean_std')
+            action_mean_min = self._transition_mean(transitions, 'action_mean_min')
+            action_mean_max = self._transition_mean(transitions, 'action_mean_max')
+            action_log_std_mean = self._transition_mean(transitions, 'action_log_std_mean')
+            action_log_std_min = self._transition_mean(transitions, 'action_log_std_min')
+            action_log_std_max = self._transition_mean(transitions, 'action_log_std_max')
+            action_saturation = self._transition_mean(transitions, 'action_saturation')
+            exposure_time_stats = self._transition_stats(transitions, 'exposure_time')
+            gain_stats = self._transition_stats(transitions, 'gain')
+            disp_finite_ratio = self._transition_mean(transitions, 'disp_finite_ratio')
+            disp_valid_ratio = self._transition_mean(transitions, 'disp_valid_ratio')
 
-            reward_disp_mean = self._transition_mean(transitions, 'reward_disp')
-            reward_cover_mean = self._transition_mean(transitions, 'reward_cover')
-            cover_next_mean = self._transition_mean(transitions, 'cover_next')
-            low_ratio_left_mean = self._transition_mean(transitions, 'low_ratio_left_next')
-            high_ratio_left_mean = self._transition_mean(transitions, 'high_ratio_left_next')
-            low_ratio_right_mean = self._transition_mean(transitions, 'low_ratio_right_next')
-            high_ratio_right_mean = self._transition_mean(transitions, 'high_ratio_right_next')
-
-            coverage_message = ''
-            if reward_disp_mean is not None and reward_cover_mean is not None and cover_next_mean is not None:
-                coverage_message += ' RDisp:{:.4f} RCov:{:.4f} CovN:{:.4f}'.format(
-                    reward_disp_mean,
-                    reward_cover_mean,
-                    cover_next_mean,
+            policy_message = ''
+            if action_mean_mean is not None:
+                policy_message += ' AMean:{:.4f}/{:.4f}[{:.4f},{:.4f}]'.format(
+                    action_mean_mean,
+                    action_mean_std if action_mean_std is not None else 0.0,
+                    action_mean_min if action_mean_min is not None else 0.0,
+                    action_mean_max if action_mean_max is not None else 0.0,
                 )
-            if (
-                low_ratio_left_mean is not None and
-                high_ratio_left_mean is not None and
-                low_ratio_right_mean is not None and
-                high_ratio_right_mean is not None
-            ):
-                coverage_message += ' LL:{:.4f} LH:{:.4f} RL:{:.4f} RH:{:.4f}'.format(
-                    low_ratio_left_mean,
-                    high_ratio_left_mean,
-                    low_ratio_right_mean,
-                    high_ratio_right_mean,
+            if action_log_std_mean is not None:
+                policy_message += ' LogStd:{:.4f}[{:.4f},{:.4f}]'.format(
+                    action_log_std_mean,
+                    action_log_std_min if action_log_std_min is not None else 0.0,
+                    action_log_std_max if action_log_std_max is not None else 0.0,
                 )
+            if action_saturation is not None:
+                policy_message += ' Sat:{:.3f}'.format(action_saturation)
+            if exposure_time_stats is not None and gain_stats is not None:
+                policy_message += ' T:{:.2f}-{:.2f} G:{:.2f}-{:.2f}'.format(
+                    exposure_time_stats['min'],
+                    exposure_time_stats['max'],
+                    gain_stats['min'],
+                    gain_stats['max'],
+                )
+            if disp_finite_ratio is not None and disp_valid_ratio is not None:
+                policy_message += ' DFinite:{:.3f} DValid:{:.3f}'.format(
+                    disp_finite_ratio,
+                    disp_valid_ratio,
+                )
+            if self.debug_nan:
+                policy_message += ' Finite:1'
 
             trained_time_past_all = tbar.format_dict['elapsed']
             single_iter_second = trained_time_past_all / (total_iter + 1 - start_epoch * len(self.train_loader))
@@ -375,9 +491,9 @@ class A2CTrainerTemplate(TrainerTemplate):
                     'Training Epoch:{:>2d}/{} Iter:{:>4d}/{} '
                     'Loss:{:#.6g}({:#.6g}) '
                     'ALR:{:.4e} CLR:{:.4e} '
-                    'ALoss:{:.4f} CLoss:{:.4f}{} '
-                    'RRaw:{:.4f} RUsed:{:.4f} Worse:{:.3f} '
-                    'SeedEPE:{:.4f} FinalEPE:{:.4f} '
+                    'ALoss:{:.4f} CLoss:{:.4f} '
+                    'Reward:{:.4f} Ent:{:.4f} ExpAbs:{:.4f}{} Worse:{:.3f} '
+                    'SeedLoss:{:.4f} FinalLoss:{:.4f} DeltaLoss:{:.4f} '
                     'DataTime:{:.2f} InferTime:{:.2f}ms '
                     'Time cost: {}/{}'
                 ).format(
@@ -391,12 +507,14 @@ class A2CTrainerTemplate(TrainerTemplate):
                     critic_lr,
                     actor_loss.item(),
                     critic_loss.item(),
-                    coverage_message,
-                    reward_raw_mean,
                     reward_used_mean,
+                    entropies.mean().item(),
+                    exposure_abs_mean,
+                    policy_message,
                     worsened_ratio,
-                    seed_epe,
-                    final_epe,
+                    seed_loss,
+                    final_loss,
+                    delta_loss,
                     data_timer - start_timer,
                     (infer_timer - data_timer) * 1000,
                     tbar.format_interval(trained_time_past_all),
@@ -411,37 +529,46 @@ class A2CTrainerTemplate(TrainerTemplate):
                 'scalar/train/return': returns.mean().item(),
                 'scalar/train/advantage': advantages.mean().item(),
                 'scalar/train/advantage_normalized': normalized_advantages.mean().item(),
-                'scalar/train/advantage_std': advantages.std().item(),
+                'scalar/train/advantage_std': advantages.std(unbiased=False).item(),
                 'scalar/train/reward': reward_used_mean,
                 'scalar/train/reward_std': reward_used_std,
-                'scalar/train/reward_used': reward_used_mean,
-                'scalar/train/reward_used_std': reward_used_std,
                 'scalar/train/reward_raw': reward_raw_mean,
                 'scalar/train/reward_raw_std': reward_raw_std,
                 'scalar/train/worsened_ratio': worsened_ratio,
                 'scalar/train/entropy': entropies.mean().item(),
-                'scalar/train/action_abs_mean': action_mean,
-                'scalar/train/seed_epe': seed_epe,
-                'scalar/train/final_epe': final_epe,
-                'scalar/train/delta_epe': seed_epe - final_epe,
+                'scalar/train/action_abs_mean': exposure_abs_mean,
+                'scalar/train/exposure_abs_mean': exposure_abs_mean,
+                'scalar/train/seed_stereo_loss': seed_loss,
+                'scalar/train/final_stereo_loss': final_loss,
+                'scalar/train/delta_stereo_loss': delta_loss,
                 'scalar/train/lr_actor': actor_lr,
                 'scalar/train/lr_critic': critic_lr,
             })
-
-            if reward_disp_mean is not None:
-                tb_info['scalar/train/reward_disp'] = reward_disp_mean
-            if reward_cover_mean is not None:
-                tb_info['scalar/train/reward_cover'] = reward_cover_mean
-            if cover_next_mean is not None:
-                tb_info['scalar/train/cover_next'] = cover_next_mean
-            if low_ratio_left_mean is not None:
-                tb_info['scalar/train/low_ratio_left'] = low_ratio_left_mean
-            if high_ratio_left_mean is not None:
-                tb_info['scalar/train/high_ratio_left'] = high_ratio_left_mean
-            if low_ratio_right_mean is not None:
-                tb_info['scalar/train/low_ratio_right'] = low_ratio_right_mean
-            if high_ratio_right_mean is not None:
-                tb_info['scalar/train/high_ratio_right'] = high_ratio_right_mean
+            if self.debug_nan:
+                tb_info['scalar/train/finite_ok'] = 1.0
+            if action_mean_mean is not None:
+                tb_info['scalar/train/action_mean_mean'] = action_mean_mean
+                tb_info['scalar/train/action_mean_std'] = action_mean_std
+                tb_info['scalar/train/action_mean_min'] = action_mean_min
+                tb_info['scalar/train/action_mean_max'] = action_mean_max
+            if action_log_std_mean is not None:
+                tb_info['scalar/train/action_log_std_mean'] = action_log_std_mean
+                tb_info['scalar/train/action_log_std_min'] = action_log_std_min
+                tb_info['scalar/train/action_log_std_max'] = action_log_std_max
+            if action_saturation is not None:
+                tb_info['scalar/train/action_saturation_ratio'] = action_saturation
+            if exposure_time_stats is not None:
+                tb_info['scalar/train/exposure_time_mean'] = exposure_time_stats['mean']
+                tb_info['scalar/train/exposure_time_min'] = exposure_time_stats['min']
+                tb_info['scalar/train/exposure_time_max'] = exposure_time_stats['max']
+            if gain_stats is not None:
+                tb_info['scalar/train/gain_mean'] = gain_stats['mean']
+                tb_info['scalar/train/gain_min'] = gain_stats['min']
+                tb_info['scalar/train/gain_max'] = gain_stats['max']
+            if disp_finite_ratio is not None:
+                tb_info['scalar/train/disp_finite_ratio'] = disp_finite_ratio
+            if disp_valid_ratio is not None:
+                tb_info['scalar/train/disp_valid_ratio'] = disp_valid_ratio
 
             if self.cfgs.TRAINER.TRAIN_VISUALIZATION:
                 final_left, final_right = rollout['final_images']
@@ -481,16 +608,16 @@ class A2CTrainerTemplate(TrainerTemplate):
                 batch=data,
                 steps=self.rollout_steps,
                 deterministic=self.deterministic_eval,
-                action_penalty_weight=self.action_penalty_weight,
             )
             infer_time = time.time() - infer_start
 
             model_pred = rollout['final_pred']
             disp_pred = model_pred['disp_pred']
             disp_gt = data['disp']
-            mask = (disp_gt < evaluator_cfgs.MAX_DISP) & (disp_gt > 0)
+            mask = torch.isfinite(disp_gt) & (disp_gt < evaluator_cfgs.MAX_DISP) & (disp_gt > 0)
             if 'occ_mask' in data and evaluator_cfgs.get('APPLY_OCC_MASK', False):
                 mask = mask & ~data['occ_mask'].to(torch.bool)
+            disp_gt = torch.nan_to_num(disp_gt, nan=0.0, posinf=0.0, neginf=0.0)
 
             indexes = data['index'].tolist()
             for metric_name in evaluator_cfgs.METRIC:

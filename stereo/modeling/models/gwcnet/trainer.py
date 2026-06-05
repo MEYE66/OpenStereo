@@ -2,6 +2,7 @@
 # @Author  : zhangchenming
 from stereo.modeling.trainer_template import TrainerTemplate
 from stereo.modeling.carla_trainer import TrainerSequenceTemplate
+from stereo.modeling.finetune_trainer_template import FinetuneTrainerTemplate
 
 from .gwcnet import GwcNet
 from .gwcnet_lidar_sparse import LidarGwcNet
@@ -31,4 +32,9 @@ class SequenceTrainer(TrainerSequenceTemplate):
         model = __all__[cfgs.MODEL.NAME](cfgs.MODEL)
         super().__init__(args, cfgs, local_rank, global_rank, logger, tb_writer, model)
         
-        
+
+
+class FinetuneTrainer(FinetuneTrainerTemplate):
+    def __init__(self, args, cfgs, local_rank, global_rank, logger, tb_writer):
+        model = __all__[cfgs.MODEL.NAME](cfgs.MODEL)
+        super().__init__(args, cfgs, local_rank, global_rank, logger, tb_writer, model)

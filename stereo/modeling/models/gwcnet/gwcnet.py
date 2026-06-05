@@ -3,9 +3,22 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .gwcnet_backbone import GwcNet as GwcNetBackbone
-from .gwcnet_cost_processor import GwcVolumeCostProcessor
-from .gwcnet_disp_processor import GwcDispProcessor
+
+import sys
+from pathlib import Path
+repo_root = Path(__file__).resolve().parents[4]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
+
+
+# from .gwcnet_backbone import GwcNet as GwcNetBackbone
+# from .gwcnet_cost_processor import GwcVolumeCostProcessor
+# from .gwcnet_disp_processor import GwcDispProcessor
+
+from stereo.modeling.models.gwcnet.gwcnet_backbone import GwcNet as GwcNetBackbone
+from stereo.modeling.models.gwcnet.gwcnet_cost_processor import GwcVolumeCostProcessor
+from stereo.modeling.models.gwcnet.gwcnet_disp_processor import GwcDispProcessor
 
 
 
@@ -52,6 +65,39 @@ class GwcNet(nn.Module):
 
         loss_info = {'scalar/train/loss_disp': loss.item()}
         return loss, loss_info
+
+
+
+
+if __name__ == "__main__":
+    
+    # simple_cfgs = {
+    #     'MAX_DISP': 192,
+    #     'USE_CONCAT_VOLUME': True,
+    #     'CONCAT_CHANNELS': 16,
+    #     'DOWNSAMPLE': (4, 8),
+    #     'NUM_GROUPS': 8,
+    #     'TIME_LIMITS': (0.1, 0.5),
+    #     'GAIN_LIMITS': (0.5, 2.0),
+    # }
+    from types import SimpleNamespace
+    cfgs = SimpleNamespace(
+        MAX_DISP=int(192),
+        USE_CONCAT_VOLUME=bool(False),
+        CONCAT_CHANNELS=int(12),
+        DOWNSAMPLE=int(4),
+        NUM_GROUPS=int(40),
+    )
+
+    model = GwcNet(cfgs)
+    # dummy_left = torch.randn(2, 3, 320, 768)
+    # dummy_right = torch.randn(2, 3, 320, 768)
+    dummy_left = torch.randn(2, 3, 384, 1280)
+    dummy_right = torch.randn(2, 3, 384, 1280)
+
+    model_out = model({'left': dummy_left, 'right': dummy_right})
+    print(model_out['disp_pred'].shape)
+    print(model.get_loss(model_out, {'disp': torch.randn(2, 384, 1280)})[0].shape)
 
 
 
