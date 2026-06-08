@@ -11,7 +11,7 @@ if str(repo_root) not in sys.path:
 
 try:
     from stereo.modeling.models.raftstereo.raft_stereo import RAFTStereo
-    from stereo.modeling.models.deephdr_cascade import DeepHDRFusion
+    from stereo.modeling.models.adaptiveaenet.exposure_fusion import MertensExposureFusion
     from stereo.modeling.models.adaptiveaenet.submodules import (
         A2CActor,
         AbsoluteExposureEnv,
@@ -20,7 +20,7 @@ try:
     )
 except ModuleNotFoundError:
     from ..raftstereo.raft_stereo import RAFTStereo
-    from ..deephdr_cascade import DeepHDRFusion
+    from .exposure_fusion import MertensExposureFusion
     from .submodules import A2CActor, AbsoluteExposureEnv, DispCritic, require_finite_tensor
 
 
@@ -80,7 +80,14 @@ class AdaptiveAENet(RAFTStereo):
 
         self.disp_reward_weight = float(_cfg_get(cfgs, 'DISP_REWARD_WEIGHT', 1.0))
         self.reward_disp_clip = float(_cfg_get(cfgs, 'REWARD_DISP_CLIP', 1.0))
-        self.return_deephdr_images = bool(_cfg_get(cfgs, 'RETURN_DEEPHDR_IMAGES', False))
+        self.exposure_fusion = MertensExposureFusion(
+            n_levels=int(_cfg_get(cfgs, 'EXPOSURE_FUSION_LEVELS', 4)),
+            w_cont=float(_cfg_get(cfgs, 'EXPOSURE_FUSION_W_CONT', 1.0)),
+            w_sat=float(_cfg_get(cfgs, 'EXPOSURE_FUSION_W_SAT', 1.0)),
+            w_exp=float(_cfg_get(cfgs, 'EXPOSURE_FUSION_W_EXP', 1.0)),
+            well_exposed_sigma=float(_cfg_get(cfgs, 'EXPOSURE_FUSION_SIGMA', 0.2)),
+            clamp_output=bool(_cfg_get(cfgs, 'EXPOSURE_FUSION_CLAMP_OUTPUT', True)),
+        )
 
         self.env = AbsoluteExposureEnv(
             time_limits=self.time_limits,
@@ -105,7 +112,6 @@ class AdaptiveAENet(RAFTStereo):
             hidden_dim=hidden_dim,
             input_size=input_size,
         )
-        self.deephdr_fusion = DeepHDRFusion(cfgs)
 
     def _stereo_modules(self):
         stereo_modules = [self.cnet, self.update_block, self.context_zqr_convs]
@@ -119,9 +125,6 @@ class AdaptiveAENet(RAFTStereo):
         for module in self._stereo_modules():
             for param in module.parameters():
                 param.requires_grad = bool(enabled)
-        if self.deephdr_fusion.trainable:
-            for param in self.deephdr_fusion.parameters():
-                param.requires_grad = bool(enabled)
         for param in self.actor.parameters():
             param.requires_grad = True
         for param in self.critic.parameters():
@@ -130,7 +133,6 @@ class AdaptiveAENet(RAFTStereo):
     def set_stereo_train_mode(self, enabled):
         for module in self._stereo_modules():
             module.train(mode=bool(enabled))
-        self.deephdr_fusion.train(mode=bool(enabled))
 
     def get_actor_parameters(self):
         return list(self.actor.parameters())
@@ -142,8 +144,6 @@ class AdaptiveAENet(RAFTStereo):
         params = []
         for module in self._stereo_modules():
             params.extend(list(module.parameters()))
-        if self.deephdr_fusion.trainable:
-            params.extend(list(self.deephdr_fusion.parameters()))
         return params
 
     def get_component_state_dicts(self):
@@ -160,21 +160,18 @@ class AdaptiveAENet(RAFTStereo):
             'stereo_state': stereo_state,
             'actor_state': self.actor.state_dict(),
             'critic_state': self.critic.state_dict(),
-            'deephdr_state': self.deephdr_fusion.state_dict(),
         }
 
-    def _forward_stereo_dual(self, left_1, right_1, left_2, right_2, state):
-        left_hdr, right_hdr = self.deephdr_fusion(left_1, right_1, left_2, right_2, state)
+    def _forward_stereo_dual(self, left_1, right_1, left_2, right_2, _state):
+        left_fused = self.exposure_fusion(left_1, left_2)
+        right_fused = self.exposure_fusion(right_1, right_2)
         pred = RAFTStereo.forward(
             self,
             {
-                'left': left_hdr,
-                'right': right_hdr,
+                'left': left_fused,
+                'right': right_fused,
             },
         )
-        if self.return_deephdr_images:
-            pred['left_hdr'] = left_hdr
-            pred['right_hdr'] = right_hdr
         return pred
 
     @staticmethod

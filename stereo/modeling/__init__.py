@@ -37,7 +37,7 @@ from .models.stereonet.trainer import Trainer as StereoAEGwcNetTrainer
 from .models.stereonet.trainer import Trainer as StereoAEPSMNetTrainer
 
 
-from .models.adpaenet.trainer import RLTrainer as AdpAENetTrainer
+from .models.ouradpaenet.trainer import RLTrainer as OurAdpAENetTrainer
 from .models.adaptiveaenet.trainer import RLTrainer as AdaptiveAENetTrainer
 
 
@@ -97,7 +97,7 @@ __all__ = {
     "AttAEGwcNet": AttAEGwcNetTrainer,
     "StereoAEGwcNet": StereoAEGwcNetTrainer,
     
-    "AdpAENet": AdpAENetTrainer,
+    "OurAdpAENet": OurAdpAENetTrainer,
     "AdaptiveAENet": AdaptiveAENetTrainer,
     
 

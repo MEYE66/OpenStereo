@@ -12,5 +12,6 @@
     ],
     "python-envs.defaultEnvManager": "ms-python.python:conda",
     "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "python.defaultInterpreterPath": "/home/lgz/miniconda/envs/openstereo"
+    "python.defaultInterpreterPath": "/home/lgz/miniconda3/envs/openstereo/bin/python",
+    "cmake.sourceDirectory": "/home/lgz/workspace/OpenStereo/deploy/cpp"
 }

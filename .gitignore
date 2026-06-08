@@ -7,7 +7,16 @@ cfgs/*/*stereocarla.yaml
 
 ref_code/
 output/
+vis_out/
 img_out/
+output_disparity/
+output/
 CKPT/
+RAFT-Stereo/
+EBSNetMEFNet/
+ADEC-main/
+frpc/
+DeepHDR-pytorch/
+
 tmp_code.py
 tmop_code2.py
