@@ -90,23 +90,32 @@ def _render_disparity_magma(disp):
     return cv2.applyColorMap(gray, cv2.COLORMAP_MAGMA)
 
 
-def _read_sample_hw(sample_name):
+def _read_sample_hw(sample_name, dataset_roots=None):
     if sample_name is None:
         return None
 
     sample_path = Path(str(sample_name))
-    ext = sample_path.suffix.lower()
-    if ext == '.npy':
-        image = np.load(sample_path)
-    else:
-        image = cv2.imread(str(sample_path), cv2.IMREAD_UNCHANGED)
-    if image is None:
-        return None
-    return image.shape[:2]
+    candidate_paths = [sample_path]
+    if not sample_path.is_absolute():
+        candidate_paths.extend(Path(root) / sample_path for root in (dataset_roots or []))
+
+    for candidate_path in candidate_paths:
+        if not candidate_path.exists():
+            continue
+
+        ext = candidate_path.suffix.lower()
+        if ext == '.npy':
+            image = np.load(candidate_path)
+        else:
+            image = cv2.imread(str(candidate_path), cv2.IMREAD_UNCHANGED)
+        if image is not None:
+            return image.shape[:2]
+
+    return None
 
 
-def _crop_to_sample_size(disp, sample_name):
-    sample_hw = _read_sample_hw(sample_name)
+def _crop_to_sample_size(disp, sample_name, dataset_roots=None):
+    sample_hw = _read_sample_hw(sample_name, dataset_roots)
     if sample_hw is None:
         return disp
 
@@ -206,7 +215,7 @@ def run_batch_infer(args, cfgs, model, local_rank, logger):
             sample_name = name_list[bi] if bi < len(name_list) else None
             save_path = _resolve_batch_output_path(sample_name, dataset_roots, output_dir, total_saved + bi)
             # img_color = disp_to_color(disp_batch[bi], max_disp=max_disp).astype('uint8')
-            disp_vis = _crop_to_sample_size(disp_batch[bi], sample_name)
+            disp_vis = _crop_to_sample_size(disp_batch[bi], sample_name, dataset_roots)
             img_color = _render_disparity_magma(disp_vis)
             cv2.imwrite(save_path, img_color)
 

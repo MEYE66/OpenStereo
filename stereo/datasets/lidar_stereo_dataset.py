@@ -223,7 +223,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Test LidarStereoDataset')
     parser.add_argument('--data_root', type=str, default="/home/lgz/dataset/ADEC/real", help='Root directory of the dataset')
-    parser.add_argument('--split_file', type=str, default="/home/lgz/workspace/OpenStereo/dataset_split/lidar_stereo/train.txt", help='Path to the split file')
+    parser.add_argument('--split_file', type=str, default="/home/lgz/workspace/OpenStereo/dataset_split/lidar_stereo/val.txt", help='Path to the split file')
     parser.add_argument('--vis_out', type=str, default='lidar_points_check.png', help='Output path for lidar projection validation image')
     args = parser.parse_args()
 
@@ -252,7 +252,7 @@ if __name__ == '__main__':
         }
     )
 
-    dataset = LidarStereoDataset(data_info=data_info, data_cfg=data_cfg, mode='training')
+    dataset = LidarStereoDataset(data_info=data_info, data_cfg=data_cfg, mode='testing')
     
     print(f"Dataset length: {len(dataset)}")
     sample = dataset[200]
@@ -265,8 +265,9 @@ if __name__ == '__main__':
 
     left = np.clip(sample['left']*255, 0, 255).astype(np.uint8)
     right = np.clip(sample['right']*255, 0, 255).astype(np.uint8)
-    flag = cv2.imwrite('./sample_left.png', cv2.cvtColor(left, cv2.COLOR_RGB2BGR))
-    cv2.imwrite('./sample_right.png', cv2.cvtColor(right, cv2.COLOR_RGB2BGR))
+    flag = cv2.imwrite('/home/lgz/workspace/OpenStereo/sample_left.png', cv2.cvtColor(left, cv2.COLOR_RGB2BGR))
+    cv2.imwrite('/home/lgz/workspace/OpenStereo/sample_right.png', cv2.cvtColor(right, cv2.COLOR_RGB2BGR))
+    # cv2.imwrite('/home/lgz/workspace/OpenStereo/sample_disp.png', (sample['disp'] / sample['disp'].max() * 255).astype(np.uint8))
     print(flag)
     # points = _load_points(os.path.join(args.data_root, dataset.data_list[200][2])) * dataset.point_scale
     # points = _transform_points_inverse(points, dataset.transform_mtx)

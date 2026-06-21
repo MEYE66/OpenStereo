@@ -32,6 +32,9 @@ from .carla_stereo_dual_dataset import CarlaStereoDualDataset
 from .carla_sequence_dataset import CarlaSequenceDataset
 
 from .lidar_stereo_dataset import LidarStereoDataset
+from .real_stereo_dataset import RealStereoDataset
+
+
 from .actor_critic_replay_buffer import ActorCriticReplayBuffer, CarlaStereoExperienceReplayBuffer, ExposureStateConfig
 
 __all__ = {
@@ -61,6 +64,7 @@ __all__ = {
     'SACBuffer': ActorCriticReplayBuffer,
     'CarlaStereoBuffer': CarlaStereoExperienceReplayBuffer,
     'LidarStereoDataset': LidarStereoDataset,
+    'RealStereoDataset': RealStereoDataset,
     
 }
 
