@@ -47,6 +47,31 @@ def _safe_max_normalize(image):
     return image / max_val
 
 
+def _validate_exposure_range(exposure_range):
+    if exposure_range is None:
+        exposure_range = [0.5, 1.5]
+    try:
+        min_exposure, max_exposure = [float(x) for x in exposure_range]
+    except (TypeError, ValueError):
+        raise ValueError(
+            'NEXT_EXPOSURE_RANGE must contain two positive values: '
+            f'{exposure_range}'
+        )
+
+    if min_exposure <= 0 or max_exposure <= 0 or min_exposure > max_exposure:
+        raise ValueError(
+            'NEXT_EXPOSURE_RANGE must satisfy 0 < min <= max, got: '
+            f'{exposure_range}'
+        )
+    return min_exposure, max_exposure
+
+
+def _apply_exposure_scale(left_img, right_img, exposure_range):
+    exposure_scale = np.random.uniform(exposure_range[0], exposure_range[1])
+    left_img = np.clip(left_img * exposure_scale, 0.0, 1.0).astype(np.float32)
+    right_img = np.clip(right_img * exposure_scale, 0.0, 1.0).astype(np.float32)
+    return left_img, right_img
+
 
 def apply_gtm(img, eps=1e-6, param=0.1):
     img = (img - np.min(img)) / (np.max(img) - np.min(img))
@@ -65,6 +90,13 @@ class CarlaStereoDualDataset(DatasetTemplate):
         self.rescale = getattr(self.data_info, 'RESCALE', True)
         self.enable_rgb = getattr(self.data_info, 'ENABLE_RGB', False)
         self.frame_step = int(getattr(self.data_info, 'FRAME_STEP', 1))
+        self.next_exposure_aug = (
+            bool(getattr(self.data_info, 'NEXT_EXPOSURE_AUG', False))
+            and self.mode.upper() == 'TRAINING'
+        )
+        self.next_exposure_range = _validate_exposure_range(
+            getattr(self.data_info, 'NEXT_EXPOSURE_RANGE', [0.5, 1.5])
+        )
         self.data_list = [item for item in self.data_list if self._has_next_frame(item)]
 
     def _get_item_paths(self, item):
@@ -111,6 +143,13 @@ class CarlaStereoDualDataset(DatasetTemplate):
         right_img = _safe_max_normalize(right_img)
         left_next_img = _safe_max_normalize(left_next_img)
         right_next_img = _safe_max_normalize(right_next_img)
+
+        if self.next_exposure_aug:
+            left_next_img, right_next_img = _apply_exposure_scale(
+                left_next_img,
+                right_next_img,
+                self.next_exposure_range,
+            )
 
         if self.enable_rgb:
             left_img = apply_gtm(left_img)

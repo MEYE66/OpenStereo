@@ -38,6 +38,8 @@ from .models.stereonet.trainer import Trainer as StereoAEPSMNetTrainer
 
 
 from .models.ouradpaenet.trainer import RLTrainer as OurAdpAENetTrainer
+from .models.absadpaenet.trainer import RLTrainer as AbsAdpAENetTrainer
+from .models.absrewardnet.trainer import RLTrainer as AbsRewardNetTrainer
 from .models.adaptiveaenet.trainer import RLTrainer as AdaptiveAENetTrainer
 
 
@@ -98,8 +100,11 @@ __all__ = {
     "StereoAEGwcNet": StereoAEGwcNetTrainer,
     
     "OurAdpAENet": OurAdpAENetTrainer,
+    "AbsAdpAENet": AbsAdpAENetTrainer,
+    "AbsRewardNet": AbsRewardNetTrainer,
+    "AbsRewardDualExpNet": AbsRewardNetTrainer,
     "AdaptiveAENet": AdaptiveAENetTrainer,
-    
+
 
 
 
@@ -112,7 +117,6 @@ __all__ = {
 
     # Sequence AE variants
     'GwcSequenceNet': GwcNetSequenceTrainer,
-
     # Lidar sparse-supervision variant
     'LidarGwcNet': GwcNetTrainer,
 
