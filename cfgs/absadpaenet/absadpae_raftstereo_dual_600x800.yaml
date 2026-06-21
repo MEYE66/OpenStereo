@@ -1,0 +1,128 @@
+DATA_CONFIG:
+    DATA_INFOS:
+        -   DATASET: CarlaStereoDualDataset
+            DATA_SPLIT: {
+                TRAINING: /home/lgz/workspace/OpenStereo/dataset_split/carla_600x800/train.txt,
+                EVALUATING: /home/lgz/workspace/OpenStereo/dataset_split/carla_600x800/val.txt,
+                TESTING: /home/lgz/workspace/OpenStereo/dataset_split/carla_600x800/val.txt
+            }
+            RETURN_RIGHT_DISP: false
+            MAX_DISP: 192
+            FRAME_STEP: 1
+            RESCALE: true
+            ENABLE_RGB: false
+
+    DATA_TRANSFORM:
+        TRAINING:
+            - { NAME: RandomCrop, SIZE: [ 512, 512 ], Y_JITTER: false }
+            - { NAME: TransposeImage }
+            - { NAME: ToTensor }
+        EVALUATING:
+            - { NAME: RightTopPad, SIZE: [ 608, 800 ] }
+            - { NAME: TransposeImage }
+            - { NAME: ToTensor }
+
+MODEL:
+    NAME: AbsAdpAENet
+    MAX_DISP: &max_disp 192
+    CORR_IMPLEMENTATION: reg
+    CORR_LEVELS: 4
+    CORR_RADIUS: 4
+    CONTEXT_NORM: batch
+    HIDDEN_DIMS: [ 128, 128, 128 ]
+    MIXED_PRECISION: false
+    N_DOWNSAMPLE: 2
+    N_GRU_LAYERS: 3
+    SHARED_BACKBONE: false
+    SLOW_FAST_GRU: false
+    TRAIN_ITERS: 22
+    EVAL_ITERS: 32
+    LOSS_GAMMA: 0.9
+    FUSION_NUM_EXPOSURES: 2
+    FUSION_NUM_HEADS: 4
+    FUSION_TAU: 1.0
+    RETURN_FUSION_ALPHA: false
+    ROLLOUT_STEPS: 3
+    TIME_LIMITS: [ 1.0, 20.0 ]
+    GAIN_LIMITS: [ 1.0, 20.0 ]
+    INIT_TIME: 5.0
+    INIT_GAIN: 7.0
+    NBITS: 10
+    DISP_REWARD_WEIGHT: 1.0
+    REWARD_DISP_CLIP: 0.5
+    RL_FEATURE_DIM: 32
+    RL_HIDDEN_DIM: 32
+    RL_INPUT_SIZE: 128
+    RL_INIT_LOG_STD: -1.0
+    ACTOR_LOG_STD_MIN: -3.0
+    ACTOR_LOG_STD_MAX: 1.0
+    FIND_UNUSED_PARAMETERS: false
+    CKPT: -1
+    PRETRAINED_MODEL: '/home/lgz/workspace/OpenStereo/output/CarlaStereoDualDataset/RAFTStereoDual/raftstereo_carla__dual_600x800_rgb/default/ckpt/checkpoint_epoch_19.pth'
+
+RL:
+    ROLLOUT_STEPS: 3
+    GAMMA: 0.99
+    GAE_LAMBDA: 0.95
+    NORMALIZE_REWARDS: false
+    REWARD_NORM_EPS: 1e-6
+    ENTROPY_WEIGHT: 0.05
+    ACTOR_LOSS_WEIGHT: 1.0
+    CRITIC_LOSS_WEIGHT: 0.25
+    DETERMINISTIC_EVAL: true
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 16
+    FREEZE_BN: false
+    SYNC_BN: true
+    AMP: false
+    NUM_EPOCHS: 5
+
+    ACTOR_OPTIMIZER:
+        NAME: AdamW
+        LR: 0.00005
+        WEIGHT_DECAY: 0.0001
+
+    CRITIC_OPTIMIZER:
+        NAME: AdamW
+        LR: 0.0003
+        WEIGHT_DECAY: 0.0001
+
+    ACTOR_SCHEDULER:
+        NAME: OneCycleLR
+        MAX_LR: 0.0001
+        PCT_START: 0.01
+        ON_EPOCH: false
+        CYCLE_MOMENTUM: false
+        ANNEAL_STRATEGY: linear
+
+    CRITIC_SCHEDULER:
+        NAME: OneCycleLR
+        MAX_LR: 0.0003
+        PCT_START: 0.01
+        ON_EPOCH: false
+        CYCLE_MOMENTUM: false
+        ANNEAL_STRATEGY: linear
+
+    CLIP_GRAD:
+        TYPE: norm
+        MAX_NORM: 5
+        NORM_TYPE: 2
+
+EVALUATOR:
+    BATCH_SIZE_PER_GPU: 8
+    MAX_DISP: *max_disp
+    METRIC:
+        - d1_all
+        - epe
+        - thres_1
+        - thres_2
+        - thres_3
+
+TRAINER:
+    EVAL_INTERVAL: 1
+    CKPT_SAVE_INTERVAL: 1
+    MAX_CKPT_SAVE_NUM: 30
+    LOGGER_ITER_INTERVAL: 100
+    TRAIN_VISUALIZATION: false
+    EVAL_VISUALIZATION: false
